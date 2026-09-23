@@ -1,6 +1,6 @@
 /* The verifier runs here, off the main thread, so the checks never stutter
  * the animation. Every result the page draws comes back from this file. */
-import { checkList, keyring, checkValidation, checkHeader, accountKey, checkProofWire, accountRoot, TRUST_ROOTS } from './verify.js';
+import { checkList, keyring, checkValidation, checkHeader, accountKey, checkProofWire, accountRoot, verifyReceipt, TRUST_ROOTS } from './verify.js';
 
 let list = null, ring = null;
 
@@ -22,9 +22,15 @@ self.onmessage = e => {
     } else if (m.t === 'val') {
       if (!ring) return;
       const r = checkValidation(m.data, ring);
-      self.postMessage({ t: 'val', at: m.at, replay: m.replay, res: r });
+      self.postMessage({ t: 'val', at: m.at, replay: m.replay, res: r, data: m.data });
     } else if (m.t === 'header') {
       self.postMessage({ t: 'header', seq: m.seq, claimed: m.hash, res: checkHeader(m.header) });
+    } else if (m.t === 'receipt') {
+      // checked with the pinned key of the publisher the receipt names, never a key from the file
+      const root = TRUST_ROOTS[m.bundle && m.bundle.root];
+      const res = root ? verifyReceipt(m.bundle, root.key) : { ok: false, why: 'it names a list publisher this page does not know' };
+      if (root) res.publisher = root.name;
+      self.postMessage({ t: 'receipt', id: m.id, res });
     } else if (m.t === 'proof') {
       // every node hashed up to the state root of a header this page already
       // checked; only then is the entry read

@@ -20,10 +20,20 @@ Output on :3783 (behind a reverse proxy at /proof-feed on the page's own site)
        {"t":"val", data, at}                          one raw validation
        on connect: {"t":"hello", ...} then the last few ledgers replayed
   GET  /vl?src=ripple|xrplf  /manifests  /account?addr=r…  /latest  /health
-       /path?key=<64 hex>&ledger=<64 hex>   the nodes from a recent ledger's state
-                                          root down to one entry, fetched by
-                                          proof-peer (proof_peer.mjs, :3784) over
-                                          the peer protocol; the page hashes them
+       /path?key=<64 hex>&ledger=<64 hex>[&tree=tx]
+                                          the nodes from a ledger's state root
+                                          (or transaction root) down to one entry,
+                                          fetched by proof-peer (proof_peer.mjs,
+                                          :3784) over the peer protocol; the page
+                                          hashes them
+       /tx?hash=<64 hex>                  a validated transaction, raw, and its ledger
+       /header?ledger=<64 hex | number>   a validated ledger's raw header
+       /headers?from=<n>&to=<m>           headers n, n-1, … m (at most 256): a walk
+                                          back through parent hashes, for receipts
+       /ledger-txs?ledger=<n>             every transaction in ledger n, raw, so the
+                                          page can rebuild its transaction tree
+Older than the local node's history, these come from a public full-history
+server (xrplcluster.com, then s2.ripple.com): no more trusted than the node.
 Paths match on suffix, so the same handler works behind the proxy prefix.
 """
 import asyncio, json, os, re, ssl, subprocess, tempfile, time, urllib.error, urllib.request, urllib.parse, http, logging
@@ -46,6 +56,10 @@ CLIENTS = set()
 RECENT  = {}   # seq -> {"ledger": frame|None, "vals": [frame]}
 TIP     = {"seq": 0, "at": 0}   # newest ledger closed, and when the relay saw it (ms)
 HASHES  = {}   # ledger hash -> seq, the recent ones a proof may be asked for
+# receipts read older ledgers (the node's disk, or a public server): a few requests a second, whoever asks
+BUCKET  = {"tokens": 20.0, "at": 0.0}
+FULL_HISTORY = ["https://xrplcluster.com/", "https://s2.ripple.com:51234/"]
+HEADERS = {}   # seq -> (hash, header hex): a validated ledger's header never changes
 HEX64   = re.compile(r"^[0-9A-F]{64}$")
 CACHE   = {"manifests": (0, None)}
 
@@ -176,9 +190,99 @@ def account(addr):
             "note": "the relay's reading; the page proves balances itself, from /path"}
 
 
-def peer_path(key, ledger):
+def spend():
+    now = time.time()
+    BUCKET["tokens"] = min(20.0, BUCKET["tokens"] + (now - BUCKET["at"]) * 4.0)
+    BUCKET["at"] = now
+    if BUCKET["tokens"] < 1:
+        return False
+    BUCKET["tokens"] -= 1
+    return True
+
+
+def remote(method, params):
+    """A public full-history server, for what the local node no longer has."""
+    last = {"error": "no full-history server answered"}
+    for url in FULL_HISTORY:
+        try:
+            req = urllib.request.Request(url, json.dumps({"method": method, "params": [params]}).encode(),
+                                         {"Content-Type": "application/json", "User-Agent": "proof-feed/1"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                res = json.load(r).get("result", {})
+            if res.get("error") in ("tooBusy", "slowDown", "noNetwork", "noCurrent", "noClosed"):
+                last = res
+                continue
+            return res
+        except Exception as e:
+            last = {"error": str(e)}
+    return last
+
+
+def either(method, params):
+    """The local node first; what it lacks, from full history. Untrusted either way."""
+    r = rpc(method, params)
+    if r.get("error") in ("txnNotFound", "lgrNotFound", "notFound", "lgrIdxsInvalid") or \
+            (method == "ledger" and not r.get("error") and not r.get("ledger")):
+        r = remote(method, params)
+    return r
+
+
+def header_at(seq):
+    if seq not in HEADERS:
+        r = either("ledger", {"ledger_index": seq, "binary": True})
+        if r.get("error") or not r.get("ledger") or not r.get("validated"):
+            raise LookupError(f"ledger {seq:,} is not available")
+        HEADERS[seq] = (r["ledger_hash"], r["ledger"]["ledger_data"])
+        while len(HEADERS) > 50000:
+            del HEADERS[next(iter(HEADERS))]
+    return HEADERS[seq]
+
+
+def get_headers(frm, to):
+    if not (0 < to <= frm and frm - to < 256):
+        return {"error": "ask for at most 256 consecutive ledgers, newest first"}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(6) as pool:
+        got = list(pool.map(lambda n: header_at(n), range(frm, to - 1, -1)))
+    return {"from": frm, "to": to, "hashes": [h for h, _ in got], "headers": [d for _, d in got]}
+
+
+def get_ledger_txs(seq):
+    r = either("ledger", {"ledger_index": seq, "transactions": True, "expand": True, "binary": True})
+    if r.get("error") or not r.get("ledger") or not r.get("validated"):
+        return {"error": f"ledger {seq:,} is not available"}
+    txs = [{"tx_blob": t["tx_blob"], "meta": t.get("meta") or t.get("meta_blob")} for t in r["ledger"].get("transactions", [])]
+    return {"ledger": seq, "hash": r["ledger_hash"], "transactions": txs}
+
+
+def get_tx(txhash):
+    """A validated transaction, raw, with the hash and number of its ledger.
+    Untrusted like everything here: the page proves all of it."""
+    r = either("tx", {"transaction": txhash, "binary": True, "api_version": 2})
+    if r.get("error"):
+        return {"error": "no record of that transaction, here or in full history. Check the hash."}
+    if not r.get("validated") or not r.get("ledger_hash"):
+        return {"error": "that transaction is not in a validated ledger yet."}
+    return {"hash": r["hash"], "ledger_hash": r["ledger_hash"], "ledger_index": r["ledger_index"],
+            "tx_blob": r["tx_blob"], "meta_blob": r["meta_blob"], "close_time_iso": r.get("close_time_iso")}
+
+
+def get_header(ledger):
+    if not HEX64.match(ledger):
+        try:
+            h, d = header_at(int(ledger))
+        except LookupError as e:
+            return {"error": str(e)}
+        return {"hash": h, "seq": int(ledger), "header": d}
+    r = either("ledger", {"ledger_hash": ledger, "binary": True})
+    if r.get("error") or not r.get("ledger") or not r.get("validated"):
+        return {"error": "that ledger is not available."}
+    return {"hash": r["ledger_hash"], "seq": r["ledger_index"], "header": r["ledger"]["ledger_data"]}
+
+
+def peer_path(key, ledger, tree="state"):
     """Relay proof-peer's answer (or its error) unchanged: the page checks it."""
-    q = urllib.parse.urlencode({"key": key, "ledger": ledger})
+    q = urllib.parse.urlencode({"key": key, "ledger": ledger, "tree": tree})
     try:
         with urllib.request.urlopen(f"{PEER_PATH}?{q}", timeout=9) as r:
             return http.HTTPStatus.OK, r.read().decode()
@@ -313,11 +417,38 @@ async def http_handler(connection, request):
                                json.dumps({"error": "key and ledger must be 64 hex characters"}))
             # only ledgers this relay has just seen close: nobody can make the
             # node dig through history, or ask about ledgers it never had
+            tree = "tx" if (q.get("tree") or [""])[0] == "tx" else "state"
+            # only ledgers this relay has just seen close: nobody can make the
+            # node dig through history, or ask about ledgers it never had
             if ledger not in HASHES:
                 return respond(connection, http.HTTPStatus.NOT_FOUND,
                                json.dumps({"error": "that is not one of the last few ledgers"}))
-            code, body = await asyncio.to_thread(peer_path, key, ledger)
+            code, body = await asyncio.to_thread(peer_path, key, ledger, tree)
             return respond(connection, code, body)
+        if path.endswith("/headers") or path.endswith("/ledger-txs"):
+            q = urllib.parse.parse_qs(url.query)
+            try:
+                a = int((q.get("from") or q.get("ledger") or ["x"])[0]); b = int((q.get("to") or [a])[0])
+            except ValueError:
+                return respond(connection, http.HTTPStatus.BAD_REQUEST, json.dumps({"error": "ledger numbers, please"}))
+            if not spend():
+                return respond(connection, http.HTTPStatus.TOO_MANY_REQUESTS, json.dumps({"error": "busy; try again in a moment"}))
+            try:
+                body = await asyncio.to_thread(get_headers, a, b) if path.endswith("/headers") else await asyncio.to_thread(get_ledger_txs, a)
+            except LookupError as e:
+                body = {"error": str(e)}
+            return respond(connection, http.HTTPStatus.OK, json.dumps(body))
+        if path.endswith("/tx") or path.endswith("/header"):
+            q = urllib.parse.parse_qs(url.query)
+            arg = (q.get("hash") or q.get("ledger") or [""])[0].strip().upper()
+            if not (HEX64.match(arg) or (path.endswith("/header") and arg.isdigit())):
+                return respond(connection, http.HTTPStatus.BAD_REQUEST,
+                               json.dumps({"error": "that is not a 64-character hash"}))
+            if not spend():
+                return respond(connection, http.HTTPStatus.TOO_MANY_REQUESTS,
+                               json.dumps({"error": "busy; try again in a moment"}))
+            fn = get_tx if path.endswith("/tx") else get_header
+            return respond(connection, http.HTTPStatus.OK, json.dumps(await asyncio.to_thread(fn, arg)))
         if path.endswith("/latest") or path.endswith("/health"):
             last = RECENT[max(RECENT)] if RECENT else None
             body = {"clients": len(CLIENTS), "tip": TIP["seq"],

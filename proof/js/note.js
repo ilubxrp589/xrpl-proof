@@ -41,7 +41,7 @@ export const L = {
 };
 
 /** Shorten a string with an ellipsis until it fits `max` pixels in the current font. */
-function fit(ctx, s, max) {
+export function fit(ctx, s, max) {
   if (ctx.measureText(s).width <= max) return s;
   while (s.length > 1 && ctx.measureText(s + '…').width > max) s = s.slice(0, -1);
   return s + '…';
@@ -67,7 +67,7 @@ export const hexBytes = h => Uint8Array.from((h.match(/../g) || []).map(x => par
 
 // ── guilloché ────────────────────────────────────────────────────────────────
 /** A woven ring: K closed curves r(θ) = R + a·sin(nθ + φk) + b·sin(mθ − 2φk). */
-function rosette(ctx, cx, cy, R, a, b, n, m, K, lw, style, phase = 0) {
+export function rosette(ctx, cx, cy, R, a, b, n, m, K, lw, style, phase = 0) {
   ctx.lineWidth = lw; ctx.strokeStyle = style;
   const steps = Math.max(720, n * 36);
   for (let k = 0; k < K; k++) {
@@ -83,7 +83,7 @@ function rosette(ctx, cx, cy, R, a, b, n, m, K, lw, style, phase = 0) {
   }
 }
 /** A braided band following a rectangle: K strands offset by phased sines. */
-function braid(ctx, x, y, w, h, amp, wavelength, K, lw, style) {
+export function braid(ctx, x, y, w, h, amp, wavelength, K, lw, style) {
   const per = 2 * (w + h), N = Math.ceil(per / 3);
   const at = s => {
     s = ((s % per) + per) % per;
@@ -136,7 +136,7 @@ function ruledText(ctx, s, x, y, size, opts = {}) {
   ctx.drawImage(c, dx, y - size);
 }
 /** Text repeated along a straight run until it fills `len`. Microprint. */
-function micro(ctx, s, x, y, len, size, angle = 0) {
+export function micro(ctx, s, x, y, len, size, angle = 0) {
   ctx.save();
   ctx.translate(x, y); ctx.rotate(angle);
   ctx.beginPath(); ctx.rect(0, -size, len, size * 2); ctx.clip();

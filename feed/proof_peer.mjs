@@ -13,7 +13,8 @@
  * No config change on the node is needed: TMGetLedger is how nodes sync, and
  * is not gated the way TMProofPathRequest ([ledger_replay]) is.
  *
- * Serves on 127.0.0.1:3784:  GET /path?key=<64 hex>&ledger=<64 hex>  and  /health
+ * Serves on 127.0.0.1:3784:  GET /path?key=<64 hex>&ledger=<64 hex>[&tree=tx]  and  /health
+ * (tree=tx: the ledger's transaction tree, keyed by transaction hash)
  * (the proof-feed relay proxies /path, for recent ledgers only)
  * Byte rules follow rippled 3.3.0: Handshake.cpp (shared value, headers),
  * Message.cpp (6-byte frame header), SHAMapNodeID (33-byte node ids).
@@ -32,7 +33,7 @@ const PEER = { host: process.env.PROOF_PEER_HOST || '127.0.0.1', port: +(process
 const LISTEN = +(process.env.PROOF_PEER_LISTEN || 3784);
 const KEYFILE = path.join(os.homedir(), '.proof-peer.key');
 const MT_PING = 3, MT_GET_LEDGER = 31, MT_LEDGER_DATA = 32;
-const LI_AS_NODE = 2, MAX_DEPTH = 16;
+const LI_TX_NODE = 1, LI_AS_NODE = 2, MAX_DEPTH = 16;
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 // ── our node identity: a secp256k1 key, kept so a reservation (if ever needed) holds
@@ -170,7 +171,7 @@ function onMessage(type, body) {
   }
   if (type !== MT_LEDGER_DATA || !inflight) return;
   const m = decode(body);
-  if (Number(m[3]?.[0] ?? -1) !== LI_AS_NODE || hex(m[1]?.[0] || []) !== inflight.ledger) return;
+  if (Number(m[3]?.[0] ?? -1) !== inflight.itype || hex(m[1]?.[0] || []) !== inflight.ledger) return;
   const round = inflight; inflight = null;
   clearTimeout(round.timer);
   if (m[6]) {
@@ -194,11 +195,13 @@ function onMessage(type, body) {
 // So every lookup for one ledger goes out in ONE request, and answers are
 // cached: any number of visitors watching any number of accounts costs about
 // one request per ledger close.
-const TYPICAL_DEPTH = 7;          // where most entries sit in a ~7M-entry tree
+// where most entries sit: ~7 levels down a ~7M-entry state tree, ~3 in a
+// ledger's few hundred transactions
+const TYPICAL_DEPTH = { [LI_AS_NODE]: 7, [LI_TX_NODE]: 3 };
 const MAX_KEYS = 64, MAX_LEDGERS = 4, TIMEOUT_MS = 6000, GATHER_MS = 60;
-const cache = new Map();          // ledger:key → { seq, nodes }
-const hint = new Map();           // key → the depth its entry sat at last time
-const pending = new Map();        // ledger → Map(key → job), waiting to be sent
+const cache = new Map();          // tree:ledger:key → { seq, nodes }
+const hint = new Map();           // tree:key → the depth its entry sat at last time
+const pending = new Map();        // tree:ledger → Map(key → job), waiting to be sent
 let inflight = null, gather = null;
 
 function remember(map, k, v, max) {
@@ -221,14 +224,15 @@ function finished(nodes, key) {
 }
 
 class Job {
-  constructor(ledger, keyHex) {
-    this.ledger = ledger; this.keyHex = keyHex; this.key = unhex(keyHex);
+  constructor(itype, ledger, keyHex) {
+    this.itype = itype; this.ledger = ledger; this.keyHex = keyHex; this.key = unhex(keyHex);
+    this.slot = `${itype}:${ledger}`;
     this.ids = pathIds(this.key); this.nodes = []; this.from = 0; this.rounds = 0; this.waiters = [];
   }
   /** The node ids this lookup still needs: down to where its entry sat last
    *  time on the first round, then one level at a time. */
   want() {
-    const to = this.rounds ? this.from : Math.max(this.from, hint.get(this.keyHex) ?? TYPICAL_DEPTH);
+    const to = this.rounds ? this.from : Math.max(this.from, hint.get(`${this.itype}:${this.keyHex}`) ?? TYPICAL_DEPTH[this.itype]);
     return this.ids.slice(this.from, Math.min(MAX_DEPTH, to) + 1);
   }
   take(got, seq) {
@@ -246,8 +250,8 @@ class Job {
     }
     const out = { seq, nodes: this.nodes.map(n => ({ depth: n.depth, data: n.data.toString('hex').toUpperCase() })) };
     if (this.nodes.length) {
-      remember(cache, this.ledger + ':' + this.keyHex, out, 4000);
-      remember(hint, this.keyHex, this.nodes[this.nodes.length - 1].depth, 20000);
+      remember(cache, `${this.slot}:${this.keyHex}`, out, 4000);
+      remember(hint, `${this.itype}:${this.keyHex}`, this.nodes[this.nodes.length - 1].depth, 20000);
     }
     for (const w of this.waiters) w.resolve(out);
   }
@@ -255,24 +259,25 @@ class Job {
 }
 
 function queue(job) {
-  let jobs = pending.get(job.ledger);
-  if (!jobs) pending.set(job.ledger, jobs = new Map());
+  let jobs = pending.get(job.slot);
+  if (!jobs) pending.set(job.slot, jobs = new Map());
   jobs.set(job.keyHex, job);
   if (!gather) gather = setTimeout(() => { gather = null; send(); }, GATHER_MS);
 }
 
 function send() {
   if (inflight || !st.up || gather || !pending.size) return;
-  const [ledger, jobs] = pending.entries().next().value;
-  pending.delete(ledger);
+  const [slot, jobs] = pending.entries().next().value;
+  pending.delete(slot);
+  const { itype, ledger } = jobs.values().next().value;
   const ids = new Map();
   for (const job of jobs.values()) for (const id of job.want()) ids.set(id.toString('hex'), id);
   const body = Buffer.concat([
-    field(1, 0, LI_AS_NODE), field(3, 2, unhex(ledger)),
+    field(1, 0, itype), field(3, 2, unhex(ledger)),
     ...[...ids.values()].map(id => field(5, 2, id)), field(8, 0, 0),
   ]);
-  inflight = { ledger, jobs, timer: setTimeout(() => {
-    if (!inflight || inflight.ledger !== ledger) return;
+  inflight = { slot, itype, ledger, jobs, timer: setTimeout(() => {
+    if (!inflight || inflight.slot !== slot) return;
     inflight = null;
     // the node sends nothing when it lacks the ledger, or is too busy to answer
     const err = new Error('the node did not answer in time');
@@ -283,18 +288,19 @@ function send() {
   st.sock.write(frame(MT_GET_LEDGER, body));
 }
 
-function fetchPath(keyHex, ledger) {
-  const hit = cache.get(ledger + ':' + keyHex);
+function fetchPath(itype, keyHex, ledger) {
+  const slot = `${itype}:${ledger}`;
+  const hit = cache.get(`${slot}:${keyHex}`);
   if (hit) return Promise.resolve(hit);
   return new Promise((resolve, reject) => {
     if (!st.up) return reject(new Error(st.error || 'not connected to the node yet'));
     // join a lookup already on its way, if there is one
-    let job = inflight && inflight.ledger === ledger && inflight.jobs.get(keyHex);
-    job ||= pending.get(ledger)?.get(keyHex);
+    let job = inflight && inflight.slot === slot && inflight.jobs.get(keyHex);
+    job ||= pending.get(slot)?.get(keyHex);
     if (!job) {
-      if (!pending.has(ledger) && pending.size >= MAX_LEDGERS) return reject(new Error('busy: too many ledgers waiting'));
-      if ((pending.get(ledger)?.size || 0) >= MAX_KEYS) return reject(new Error('busy: too many lookups for this ledger'));
-      job = new Job(ledger, keyHex);
+      if (!pending.has(slot) && pending.size >= MAX_LEDGERS) return reject(new Error('busy: too many ledgers waiting'));
+      if ((pending.get(slot)?.size || 0) >= MAX_KEYS) return reject(new Error('busy: too many lookups for this ledger'));
+      job = new Job(itype, ledger, keyHex);
       queue(job);
     }
     job.waiters.push({ resolve, reject });
@@ -311,12 +317,14 @@ http.createServer(async (req, res) => {
   if (!url.pathname.endsWith('/path')) return reply(404, { error: 'not found' });
   const key = (url.searchParams.get('key') || '').toUpperCase(), ledger = (url.searchParams.get('ledger') || '').toUpperCase();
   if (!/^[0-9A-F]{64}$/.test(key) || !/^[0-9A-F]{64}$/.test(ledger)) return reply(400, { error: 'key and ledger must be 64 hex characters' });
+  // which tree: the ledger's account state (default), or its transactions (keyed by tx hash)
+  const tree = url.searchParams.get('tree') === 'tx' ? 'tx' : 'state';
   const t0 = Date.now();
   try {
-    const r = await fetchPath(key, ledger);
+    const r = await fetchPath(tree === 'tx' ? LI_TX_NODE : LI_AS_NODE, key, ledger);
     st.served++;
     // root first, one node per depth; the browser hashes every one of them
-    reply(200, { ledger, seq: r.seq, key, nodes: r.nodes, ms: Date.now() - t0 });
+    reply(200, { ledger, seq: r.seq, tree, key, nodes: r.nodes, ms: Date.now() - t0 });
   } catch (e) {
     reply(502, { error: e.message });
   }

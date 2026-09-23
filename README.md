@@ -21,6 +21,12 @@ Ink means checked here. Pencil means someone else said so.
 
 All of it runs in a Web Worker, using [@noble/curves](https://github.com/paulmillr/noble-curves) and [@noble/hashes](https://github.com/paulmillr/noble-hashes), vendored in `proof/vendor/`.
 
+## Receipts for any transaction
+
+Paste a transaction hash into the lookup box (or open `…/proof/?tx=<hash>`) and the page proves it: from the ledger it has just checked, through that ledger's own record of earlier ledgers and, for older ones, a chain of parent hashes, down to the transaction and its result in its ledger's transaction tree. Nothing on the way is trusted; a wrong byte anywhere breaks the chain. It works back to the start of the ledger's history in 2013, using a public full-history server for anything older than the local node keeps.
+
+**Download the receipt (PDF)** gives you an engraved receipt with the evidence attached inside the PDF. Drop it back on the page, now or years from now, and every check runs again, with nothing else needed. Memos on the transaction are shown, and proven, as part of it.
+
 ## What it trusts
 
 One key: the list publisher's, which you pick on the page. The relay and the peer service below are untrusted. They can withhold data, which shows as missing signatures or a balance left in pencil, but nothing they send is inked unless it checks out.
@@ -30,6 +36,7 @@ One key: the list publisher's, which you pick on the page. The relay and the pee
 - `proof/` is the page: static files, no build step. A WebGL 2 renderer engraves the certificate, a temple whose 35 columns ink as their validators' signatures check out. It has a guided tour with narration, and layouts for phones held either way.
 - `feed/proof_feed.py` is the relay. It subscribes to a local xrpld's ledger and validation streams and forwards the raw bytes over WebSocket. It also serves the two signed lists, the validators' manifests, the relay's own reading of an account (the pencil), and state-tree paths from the peer service.
 - `feed/proof_peer.mjs` joins the local xrpld as a peer, over the XRPL peer protocol, and asks for the state-tree nodes along an account's path: the same request nodes use to sync. Lookups for one ledger go out as one request and are cached.
+- `proof/js/receipt.js`, `pdf.js` and `receipt-art.js` gather a receipt's evidence, write the PDF (by hand, no library) with the evidence attached, and draw the receipt. `verifyReceipt` in `verify.js` is the one check that both makes and later accepts a receipt.
 - `narration/` holds the tour's narration scripts and the script that renders them with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M). The rendered clips are in `proof/audio/`.
 
 ## Running it

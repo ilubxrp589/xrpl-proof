@@ -83,5 +83,10 @@ if (process.env.AGAIN) {
   await shot('again');
   await ev(`document.getElementById('tour-skip').click()`); await sleep(1500);
 }
+if (process.env.RECEIPT) {
+  await ev(`window.__proof.proveTx('${process.env.RECEIPT}')`); await sleep(2000); await shot('receipt');
+  console.log('receipt:', await ev(`document.getElementById('receipt').dataset.state`));
+  await ev(`document.getElementById('rc-close').click()`);
+}
 await ev(`document.getElementById('help').click()`); await sleep(2500); await shot('legend');
 ws.close(); chrome.kill('SIGKILL'); process.exit(0);

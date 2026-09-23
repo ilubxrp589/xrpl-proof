@@ -10,6 +10,9 @@ import { buildStatic, Dynamic, xrpText, W as SW, H as SH, L as SL } from './note
 import { TRUST_ROOTS, accountKey } from './verify.js';
 import { Sound } from './audio.js';
 import { Tour } from './tour.js';
+import { buildReceipt } from './receipt.js';
+import { receiptPdf, readEvidence } from './pdf.js';
+import { drawReceipt, amountText, headline, utc, RW, RH } from './receipt-art.js';
 
 const $ = s => document.querySelector(s);
 const RELAY = (() => {
@@ -38,7 +41,7 @@ const target = { ink: new Float32Array(41), glory: 0, quorum: 0, flip: 0, mouse:
 target.ink[PART.GROUND] = 1; target.ink[PART.CORNER] = 1;
 
 let renderer, dyn, dyn_, sound = new Sound(), tour = null;
-let list = null, rootName = new URLSearchParams(location.search).get('root') === 'xrplf' ? 'xrplf' : 'ripple';
+let list = null, listRaw = null, rootName = new URLSearchParams(location.search).get('root') === 'xrplf' ? 'xrplf' : 'ripple';
 const ledgers = new Map();        // seq → buffered, checked material
 let show = null, hold = false, proven = 0, ws = null;
 const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
@@ -67,7 +70,7 @@ worker.onmessage = e => {
     if (r.idx < 0 || !r.ok || !r.full) return;
     const L = ledger(r.seq);
     if (L.checks.some(c => c.idx === r.idx && c.hash === r.hash)) return;
-    const c = { idx: r.idx, hash: r.hash, sig: r.sig, at: m.at };
+    const c = { idx: r.idx, hash: r.hash, sig: r.sig, at: m.at, data: m.data };   // the raw bytes go into receipts
     L.checks.push(c);
     L.byHash.set(r.hash, (L.byHash.get(r.hash) || 0) + 1);
     settle(L);
@@ -77,6 +80,9 @@ worker.onmessage = e => {
     L.hdr = m.res;
     settle(L);
     askProof(L);
+  } else if (m.t === 'receipt') {
+    const done = receiptWait.get(m.id);
+    if (done) { receiptWait.delete(m.id); done(m.res); }
   } else if (m.t === 'proof') {
     const L = ledgers.get(m.seq);
     if (!L || !watch || m.addr !== watch.addr) return;
@@ -93,6 +99,8 @@ function settle(L) {
   if (n >= list.quorum) {
     L.proven = true;
     proven++;
+    // a link with ?tx= proves that transaction as soon as there is a ledger to anchor it
+    if (wantTx) { const t = wantTx; wantTx = null; setTimeout(() => proveTx(t), 400); }
     $('#tally').textContent = `${fmt(proven)} ledger${proven === 1 ? '' : 's'} proven in this browser since you arrived.`;
   }
 }
@@ -119,6 +127,7 @@ async function loadList() {
       fetch(`${RELAY}/manifests`).then(r => r.json()),
     ]);
     worker.postMessage({ t: 'list', body: vl, manifests: mf.manifests, root: rootName });
+    listRaw = { root: rootName, body: vl, manifests: mf.manifests };   // as fetched, for receipts
   } catch (e) {
     fail('The relay is not answering, so there is nothing to check yet. It will be retried in ten seconds.');
     setTimeout(loadList, 10000);
@@ -741,7 +750,8 @@ function note(L) {
 $('#addr-form').addEventListener('submit', async e => {
   e.preventDefault();
   const addr = $('#addr').value.trim();
-  if (!/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(addr)) { $('#addr-note').textContent = 'That is not an XRP Ledger address. They start with r.'; return; }
+  if (/^[0-9A-Fa-f]{64}$/.test(addr)) { proveTx(addr.toUpperCase()); return; }
+  if (!/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(addr)) { $('#addr-note').textContent = 'That is neither an XRP Ledger address (they start with r) nor a transaction hash (64 characters, 0-9 and A-F).'; return; }
   let key;
   try { key = accountKey(addr); } catch (err) {
     $('#addr-note').textContent = 'That address does not check out: its last characters are a checksum, and they do not match. Look for a typo.';
@@ -762,6 +772,140 @@ $('#addr-form').addEventListener('submit', async e => {
   for (const L of ledgers.values()) askProof(L);
   if (tour) tour.event('lookup');
 });
+
+// ── receipts ────────────────────────────────────────────────────────────────
+// A transaction hash in the lookup box (or ?tx= in the address) is proven into
+// a receipt: evidence gathered from the relay, checked in the worker by the
+// same code that checks a receipt file dropped on the page, then drawn and
+// wrapped in a PDF with the evidence attached.
+let wantTx = /^[0-9A-Fa-f]{64}$/.test(new URLSearchParams(location.search).get('tx') || '') ? new URLSearchParams(location.search).get('tx').toUpperCase() : null;
+let receiptJobs = 0, current = null;
+const receiptWait = new Map();
+const checkReceipt = bundle => new Promise(done => { const id = ++receiptJobs; receiptWait.set(id, done); worker.postMessage({ t: 'receipt', id, bundle }); });
+const pause = ms => new Promise(r => setTimeout(r, ms));
+const hs = x => Number(x).toLocaleString('en-US').replace(/,/g, '\u202F');
+
+/** The newest ledger proven here, with the signatures that proved it. */
+function anchorLedger() {
+  let best = null;
+  for (const L of ledgers.values()) if (L.proven && L.hdr && L.header && (!best || L.seq > best.seq)) best = L;
+  if (!best) return null;
+  return { seq: best.seq, hash: best.hdr.hash, header: best.header,
+           validations: best.checks.filter(c => c.hash === best.hdr.hash && c.data).map(c => c.data) };
+}
+
+async function proveTx(hash) {
+  receiptOpen(`Proving transaction ${hash.slice(0, 8)}…${hash.slice(-6)}`);
+  $('#addr-note').textContent = 'Proving that transaction…'; $('#addr-path').textContent = '';
+  try {
+    let bundle = null;
+    for (let tries = 0; !bundle; tries++) {
+      let anchor = anchorLedger();
+      for (let i = 0; !anchor && i < 40; i++) { receiptStep('Waiting for this page to prove its first ledger…'); await pause(500); anchor = anchorLedger(); }
+      if (!anchor) throw new Error('no ledger has been proven here yet, so there is nothing to anchor the receipt to');
+      try { bundle = await buildReceipt({ relay: RELAY, txHash: hash, anchor, list: listRaw, step: receiptStep }); }
+      catch (err) {
+        // a transaction newer than the ledger on hand: wait for the next one to be proven
+        if (!/newer than the last ledger/.test(err.message) || tries > 4) throw err;
+        receiptStep('That transaction is newer than the last ledger proven here. Waiting for the next…'); await pause(3500);
+      }
+    }
+    receiptStep('Checking every signature and hash…');
+    const v = await checkReceipt(bundle);
+    if (!v.ok) throw new Error(`the evidence does not check out: ${v.why}`);
+    receiptShow(v, bundle, 'Proven in this browser, just now');
+    $('#addr-note').textContent = 'Proven. The receipt is open.';
+  } catch (err) {
+    receiptFail(`Could not prove that transaction: ${err.message}.`);
+    $('#addr-note').textContent = '';
+  }
+}
+
+async function checkFile(file) {
+  receiptOpen(`Checking ${file.name}`);
+  try {
+    const bundle = readEvidence(new Uint8Array(await file.arrayBuffer()));
+    receiptStep('Checking every signature and hash in it…');
+    const v = await checkReceipt(bundle);
+    if (!v.ok) return receiptFail(`This receipt does not check out: ${v.why}.`);
+    receiptShow(v, bundle, `Checked in this browser, from ${file.name}`);
+  } catch (err) { receiptFail(`This file cannot be checked: ${err.message}.`); }
+}
+
+function receiptOpen(title) {
+  current = null;
+  const r = $('#receipt');
+  r.hidden = false; r.dataset.state = 'working';
+  $('#rc-kicker').textContent = title;
+  for (const id of ['#rc-lead', '#rc-amount', '#rc-issuer', '#rc-parties', '#rc-outcome', '#rc-proof']) $(id).textContent = '';
+  $('#rc-rows').replaceChildren();
+  $('#rc-pdf').hidden = true;
+  receiptStep('Asking the relay…');
+}
+function receiptStep(s) { $('#rc-steps').textContent = s; }
+function receiptFail(s) {
+  $('#receipt').dataset.state = 'failed';
+  $('#rc-kicker').textContent = 'Not proven';
+  receiptStep(s);
+}
+function receiptShow(v, bundle, kicker) {
+  current = { v, bundle };
+  const tx = v.tx, h = headline(tx), r = $('#receipt');
+  r.dataset.state = 'proven';
+  $('#rc-kicker').textContent = kicker;
+  $('#rc-lead').textContent = h.lead;
+  $('#rc-amount').textContent = h.amount ? amountText(h.amount, '\u202F') : tx.type;
+  $('#rc-issuer').textContent = h.amount && h.amount.issuer ? `issued by ${h.amount.issuer}` : h.then || '';
+  $('#rc-parties').textContent = tx.destination ? `from ${tx.account} to ${tx.destination}` : `from ${tx.account}`;
+  $('#rc-outcome').textContent = tx.succeeded ? 'Succeeded' : `Failed: ${tx.result}. The fee was still charged.`;
+  const rows = [['Transaction', v.hash], ['Ledger', `${hs(v.ledger.seq)}, closed ${utc(v.ledger.close)}`],
+                ['Fee', amountText(tx.fee, '\u202F')]];
+  if (tx.destinationTag !== null) rows.push(['Destination tag', String(tx.destinationTag)]);
+  if (tx.invoiceId) rows.push(['Invoice ID', tx.invoiceId]);
+  if (tx.delivered && tx.amount && amountText(tx.delivered) !== amountText(tx.amount)) rows.push(['Amount sent', amountText(tx.amount, '\u202F')]);
+  for (const m of tx.memos) rows.push([m.type && m.type.length < 24 ? `Memo (${m.type})` : 'Memo', m.data || '']);
+  $('#rc-rows').replaceChildren(...rows.flatMap(([k, val]) => {
+    const dt = document.createElement('dt'), dd = document.createElement('dd');
+    dt.textContent = k; dd.textContent = val;
+    return [dt, dd];
+  }));
+  $('#rc-proof').textContent = `Ledger ${hs(v.anchor.seq)} was signed by ${v.anchor.signers} of the ${v.anchor.listed} validators on ${v.publisher}\u2019s list (a quorum is ${v.anchor.quorum}). ` +
+    (v.steps === 0 ? 'The transaction is in that ledger\u2019s own transaction tree.'
+      : `From it, ${v.steps === 1 ? 'its record of earlier ledgers' : `its record of earlier ledgers and ${v.steps - 1} more headers, each the parent of the one before,`} lead to ledger ${hs(v.ledger.seq)}, and that ledger\u2019s transaction tree to the transaction.`);
+  $('#rc-pdf').hidden = false;
+  receiptStep('');
+}
+$('#rc-close').addEventListener('click', () => { $('#receipt').hidden = true; current = null; });
+$('#rc-pdf').addEventListener('click', async () => {
+  if (!current) return;
+  const { v, bundle } = current;
+  receiptStep('Engraving the receipt…');
+  await pause(30);
+  const c = drawReceipt(v);
+  const jpeg = new Uint8Array(await (await new Promise(r => c.toBlob(r, 'image/jpeg', 0.84))).arrayBuffer());
+  const pdf = receiptPdf({ jpeg, width: RW, height: RH, title: `XRPL transaction receipt ${v.hash.slice(0, 16)}`,
+    evidence: new TextEncoder().encode(JSON.stringify(bundle)),
+    lines: [`XRPL transaction ${v.hash}, ledger ${v.ledger.seq} (${v.ledger.hash})`,
+            'To check this receipt, drop this file on https://v2v.halcyon-names.io/proof/ . Its evidence is attached (proof-receipt.json).'] });
+  const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `xrpl-receipt-${v.hash.slice(0, 12).toLowerCase()}.pdf` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  perf.lastPdf = pdf;                                    // test hook
+  receiptStep('Downloaded.');
+});
+// a receipt dropped anywhere on the page, or picked with the button, is checked
+$('#check-receipt').addEventListener('click', () => $('#receipt-file').click());
+$('#receipt-file').addEventListener('change', e => { const f = e.target.files[0]; if (f) checkFile(f); e.target.value = ''; });
+addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); document.body.classList.add('dropping'); } });
+addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dropping'); });
+addEventListener('drop', e => {
+  if (![...e.dataTransfer.types].includes('Files')) return;
+  e.preventDefault(); document.body.classList.remove('dropping');
+  const f = e.dataTransfer.files[0];
+  if (f) checkFile(f);
+});
+perf.proveTx = proveTx; perf.checkBytes = (bytes, name = 'receipt.pdf') => checkFile(new File([bytes], name));
 
 addEventListener('keydown', e => {
   if (e.target instanceof Element && e.target.closest('input, textarea')) return;
