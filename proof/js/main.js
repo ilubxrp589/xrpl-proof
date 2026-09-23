@@ -191,9 +191,11 @@ function begin(seq) {
   const L = ledgers.get(seq);
   if (!L) return;
   dyn.ledger(seq);
-  for (let i = 0; i < N_COLS; i++) { target.ink[i] = 0; st.ink[i] = 0; }
-  for (const p of [PART.BEAM, PART.DOME, PART.LANTERN]) { target.ink[p] = 0; st.ink[p] = 0; }
-  target.glory = 0; st.glory = 0; target.quorum = 0;
+  // the temple's ink drains away slowly while this ledger's checks fill it
+  // again (frame()): no part of it snaps blank, so the change never flashes
+  for (let i = 0; i < N_COLS; i++) target.ink[i] = 0;
+  for (const p of [PART.BEAM, PART.DOME, PART.LANTERN]) target.ink[p] = 0;
+  target.glory = 0; target.quorum = 0;
   // replay each check at the offset it actually arrived after the close
   const span = reduced ? 0.001 : 2.8;
   const offs = L.checks.map(c => Math.max(0, (c.at - L.closeAt) / 1000));
@@ -202,7 +204,8 @@ function begin(seq) {
   show = { seq, elapsed: 0, queue: L.checks.map((c, i) => ({ ...c, t: 0.15 + offs[i] * scale })),
            signed: new Set(), drawn: new Set(), count: 0, quorumAt: null, quorumHash: null, headerAt: null,
            mismatch: false, acctDone: false };
-  if (watch) { pencil(); askProof(L); }
+  // the pencil only where no ghost of the last proven balance already stands
+  if (watch) { if (!dyn.ghostAccount) pencil(); askProof(L); }
   dyn.stepTicks(3);                      // the paper, the list and the keys already hold
   if (tour) tour.event('begin', { seq });
   if (!hintShown) { hintShown = true; setTimeout(showHint, 2500); }
@@ -329,7 +332,7 @@ function fail(msg, steps) {
 let last = performance.now();
 // a slow renderer (software GL in a test harness) may ask for bigger steps
 const DT_MAX = Math.min(4, Number(new URLSearchParams(location.search).get('dtmax')) || 0.1);
-const perf = window.__proof = { frames: 0, ms: 0, tour: () => tour,
+const perf = window.__proof = { frames: 0, ms: 0, tour: () => tour, dyn: () => dyn, trace: [], tracing: false,
   state: () => ({ list: !!list, show: show && show.seq, pulling, hold, newest, wantShow,
                   ledgers: [...ledgers].map(([k, L]) => [k, L.checks.length, !!L.hdr, L.proven]),
                   watch: watch && watch.addr, lantern: target.ink[PART.LANTERN],
@@ -349,9 +352,14 @@ function frame(dt) {
   st.time += dt;
   step(dt);
   const k = 1 - Math.exp(-dt * 5.5), kin = 1 - Math.exp(-dt * (reduced ? 60 : 4.2));
-  for (let i = 0; i < 41; i++) st.ink[i] += (target.ink[i] - st.ink[i]) * kin;
+  // ink arrives quickly and leaves slowly: between ledgers the temple fades
+  // and refills rather than blinking
+  const kout = 1 - Math.exp(-dt * (reduced ? 60 : 1.0));
+  for (let i = 0; i < 41; i++) st.ink[i] += (target.ink[i] - st.ink[i]) * (target.ink[i] > st.ink[i] ? kin : kout);
   st.glory += (target.glory - st.glory) * (1 - Math.exp(-dt * 1.2));
-  st.quorum += (target.quorum - st.quorum) * k;
+  st.quorum += (target.quorum - st.quorum) * (target.quorum > st.quorum ? k : kout);
+  if (perf.tracing) perf.trace.push([+st.time.toFixed(2), show && show.seq,
+    +(st.ink.slice(0, N_COLS).reduce((a, b) => a + b, 0) / N_COLS).toFixed(3), +st.ink[PART.DOME].toFixed(3), +st.glory.toFixed(3)]);
   st.flip += (target.flip - st.flip) * (1 - Math.exp(-dt * 4));
   st.mouse[0] += (target.mouse[0] - st.mouse[0]) * k;
   st.mouse[1] += (target.mouse[1] - st.mouse[1]) * k;
@@ -689,6 +697,7 @@ function paintAccount(L) {
     dyn.account(watch.addr, a.ok ? a.drops : null, a.path.filter(Boolean));
     if (target.ink[PART.LANTERN] < 1) { target.ink[PART.LANTERN] = 1; dyn.stepTicks(7); sound.chime(); }
   } else {
+    dyn.clearAccount();
     pencil(L);
   }
   note(L);

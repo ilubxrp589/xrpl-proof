@@ -464,6 +464,9 @@ const ACCT_Y = L.ledger.y + 4 * 58;         // the account's rows, under the hea
 /** Dynamic ink, drawn additively in pure primaries on black:
  *    R intaglio (autographs, the ledger block)   G red letterpress   B the count
  *  plus a half-size fluorescent layer (R names that fluoresce, G pencil). */
+// the last ledger's ink, at a quarter strength, until this ledger's own replaces it
+const GHOST = 'rgb(66,0,0)', FULL = 'rgb(255,0,0)';
+
 export class Dynamic {
   constructor(validators, quorum) {
     this.c = canvas(); this.g = this.c.getContext('2d');
@@ -471,6 +474,8 @@ export class Dynamic {
     this.bk = canvas(W, H); this.bg = this.bk.getContext('2d');
     this.validators = validators; this.quorum = quorum;
     this.dirty = []; this.uvDirty = false; this.bkDirty = false;
+    this.inked = { sigs: new Map(), header: null, acct: null };   // what this ledger has inked so far
+    this.ghostAccount = false;
     this.clear();
   }
   clear() {
@@ -479,8 +484,10 @@ export class Dynamic {
     }
     this.dirty = [[0, 0, W, H]]; this.uvDirty = true; this.bkDirty = true;
   }
-  /** New ledger: serial, blank cells, the count at zero. Only the regions a
-   *  ledger writes are wiped and re-uploaded, not the whole sheet. */
+  /** New ledger: serial, the count at zero, and the last ledger's ink left as
+   *  a faint ghost until this ledger's own replaces it, so nothing on the sheet
+   *  blanks all at once. Only the regions a ledger writes are wiped and
+   *  re-uploaded, not the whole sheet. */
   ledger(seq) {
     const P = L.sig, B = BACK_GRID;
     const front = [[L.serial.x - 30, L.serial.y - 130, 1000, 190], [P.x - 10, P.y - 10, P.w + 20, P.h + 20],
@@ -493,6 +500,12 @@ export class Dynamic {
     this.ug.globalCompositeOperation = 'source-over'; this.ug.fillStyle = '#000'; this.ug.fillRect(0, 0, W / 2, H / 2);
     if (!this.first) { this.first = true; this.clear(); }
     else { this.dirty.push(...front); this.bkRects = (this.bkRects || []).concat(backRects); this.uvDirty = true; }
+    const last = this.inked;
+    this.inked = { sigs: new Map(), header: null, acct: null };
+    for (const [i, sig] of last.sigs) this.drawSig(i, sig, true);
+    if (last.header) this.drawHeader(last.header, true);
+    if (last.acct) this.drawAccount(...last.acct, true);
+    this.ghostAccount = !!last.acct;
     const g = this.g;
     g.globalCompositeOperation = 'lighter';
     // grouped with thin spaces, as serials are: Bodoni's comma reads as a full stop at this size
@@ -520,12 +533,26 @@ export class Dynamic {
   }
   /** One validator's signature on this ledger has been checked. */
   signed(i, sigBytes) {
+    this.inked.sigs.set(i, sigBytes);
+    this.drawSig(i, sigBytes, false);
+    // and its tick on the back's list
+    const b = BACK_GRID, bx = b.x + (i % 3) * b.cw, by = b.y + ((i / 3) | 0) * b.rh;
+    const bg = this.bg;
+    bg.globalCompositeOperation = 'lighter'; bg.strokeStyle = 'rgb(255,0,0)'; bg.lineWidth = 4; bg.lineCap = 'round';
+    bg.beginPath(); bg.moveTo(bx + 5, by + 20); bg.lineTo(bx + 13, by + 30); bg.lineTo(bx + 30, by + 4); bg.stroke();
+    this.bkRects = (this.bkRects || []).concat([[bx - 4, by - 4, 44, 44]]);
+  }
+  /** A validator's autograph and its fluorescent name, in full ink or as the
+   *  last ledger's ghost; either replaces whatever the cell held. */
+  drawSig(i, sigBytes, ghost) {
     const P = L.sig, cols = 18, cw = P.w / cols, rh = P.h / 2;
     const row = i < cols ? 0 : 1, col = row ? i - cols : i;
     const x = P.x + col * cw + (row ? cw / 2 : 0), y = P.y + row * rh;
     const g = this.g;
-    g.globalCompositeOperation = 'lighter';
-    g.strokeStyle = 'rgb(255,0,0)'; g.lineCap = 'round';
+    g.globalCompositeOperation = 'source-over'; g.fillStyle = '#000'; g.fillRect(x, y, cw, rh);
+    // painted over, not added: the pen's hundreds of overlapping segments would
+    // otherwise build a ghost's quarter-strength ink back up to full
+    g.strokeStyle = ghost ? GHOST : FULL; g.lineCap = 'round';
     autograph(g, x + 6, y + 10, cw - 12, rh - 48, sigBytes);
     this.dirty.push([x, y, cw, rh]);
     // its domain, in fluorescent ink: a spoke just inside the oval's edge, like
@@ -539,17 +566,13 @@ export class Dynamic {
     ug.save();
     ug.translate(ex, ey);
     ug.rotate(left ? ang + Math.PI : ang);          // never upside down
-    ug.font = fontSpec(9, 700); ug.fillStyle = 'rgb(255,0,0)'; ug.textBaseline = 'middle';
+    ug.globalCompositeOperation = 'source-over'; ug.fillStyle = '#000';
+    ug.fillRect(left ? -1 : -91, -8, 92, 16);
+    ug.font = fontSpec(9, 700); ug.fillStyle = ghost ? GHOST : FULL; ug.textBaseline = 'middle';
     ug.textAlign = left ? 'left' : 'right';         // the name runs inward from the edge
     ug.fillText(fit(ug, domainOf(this.validators[i]).toUpperCase(), 86), 0, 0);
     ug.restore();
     this.uvDirty = true;
-    // and its tick on the back's list
-    const b = BACK_GRID, bx = b.x + (i % 3) * b.cw, by = b.y + ((i / 3) | 0) * b.rh;
-    const bg = this.bg;
-    bg.globalCompositeOperation = 'lighter'; bg.strokeStyle = 'rgb(255,0,0)'; bg.lineWidth = 4; bg.lineCap = 'round';
-    bg.beginPath(); bg.moveTo(bx + 5, by + 20); bg.lineTo(bx + 13, by + 30); bg.lineTo(bx + 30, by + 4); bg.stroke();
-    this.bkRects = (this.bkRects || []).concat([[bx - 4, by - 4, 44, 44]]);
   }
   /** Tick the back's numbered steps that hold for this ledger (1-based). */
   stepTicks(n) {
@@ -564,18 +587,24 @@ export class Dynamic {
   /** The ledger block: number, hash, state root, close time. Inked only once
    *  the header has hashed to what the quorum signed. */
   header(h) {
-    const g = this.g, x = L.ledger.x, y = L.ledger.y;
+    this.inked.header = h;
+    this.drawHeader(h, false);
+  }
+  drawHeader(h, ghost) {
+    const g = this.g, x = L.ledger.x, y = L.ledger.y, ink = ghost ? GHOST : FULL;
+    const rect = [x - 10, y - 40, 720, 4 * 58];
+    g.globalCompositeOperation = 'source-over'; g.fillStyle = '#000'; g.fillRect(...rect);
     g.globalCompositeOperation = 'lighter';
     const close = new Date((h.close + 946684800) * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
     const rows = [['hash', short(h.hash, 12, 12)], ['state root', short(h.stateRoot, 12, 12)],
                   ['closed', close], ['XRP in existence', xrpText(BigInt(h.drops) / 1000000n * 1000000n)]];
     const max = L.sig.x - 40 - (x + 210);            // the values end before the signatures begin
     rows.forEach(([k, v], j) => {
-      text(g, k, x, y + j * 58, 24, { italic: true, fill: 'rgb(255,0,0)' });
+      text(g, k, x, y + j * 58, 24, { italic: true, fill: ink });
       g.font = fontSpec(24, 600);
-      text(g, fit(g, v, max), x + 210, y + j * 58, 24, { weight: 600, fill: 'rgb(255,0,0)', stroke: 0.8 });
+      text(g, fit(g, v, max), x + 210, y + j * 58, 24, { weight: 600, fill: ink, stroke: 0.8 });
     });
-    this.dirty.push([x - 10, y - 40, 720, 260]);
+    this.dirty.push(rect);
   }
   /** An account's balance as the relay reports it, in pencil: not ink,
    *  because nothing has proven it yet. It sits where the proven rows go. */
@@ -603,20 +632,30 @@ export class Dynamic {
    *  of intaglio under the header's. `drops` is null when the tree proves the
    *  account is not there; `path` is the branch taken at each inner node. */
   account(addr, drops, path) {
-    const g = this.g, x = L.ledger.x, y = ACCT_Y;
-    this.clearAccount();
     this.clearPencil();
+    this.drawAccount(addr, drops, path, false);
+    this.inked.acct = [addr, drops, path];
+    this.ghostAccount = false;
+  }
+  drawAccount(addr, drops, path, ghost) {
+    const g = this.g, x = L.ledger.x, y = ACCT_Y, ink = ghost ? GHOST : FULL;
+    this.wipeAccount();
     g.globalCompositeOperation = 'lighter';
     const max = L.sig.x - 40 - (x + 210);
     const rows = [[short(addr, 6, 5), drops === null ? 'not in this ledger' : `${xrpText(drops)} XRP`],
                   ['its path', path.join(' \u203A ')]];
     rows.forEach(([k, v], j) => {
-      text(g, k, x, y + j * 58, 24, { italic: true, fill: 'rgb(255,0,0)' });
+      text(g, k, x, y + j * 58, 24, { italic: true, fill: ink });
       g.font = fontSpec(24, 600);
-      text(g, fit(g, v, max), x + 210, y + j * 58, 24, { weight: 600, fill: 'rgb(255,0,0)', stroke: 0.8 });
+      text(g, fit(g, v, max), x + 210, y + j * 58, 24, { weight: 600, fill: ink, stroke: 0.8 });
     });
   }
+  /** The account's rows gone, and not carried to the next ledger as a ghost. */
   clearAccount() {
+    this.wipeAccount();
+    this.inked.acct = null; this.ghostAccount = false;
+  }
+  wipeAccount() {
     const r = [L.ledger.x - 10, ACCT_Y - 40, 720, 58 + 70];
     this.g.globalCompositeOperation = 'source-over'; this.g.fillStyle = '#000'; this.g.fillRect(...r);
     this.dirty.push(r);
