@@ -49,7 +49,7 @@ You need an xrpld (rippled) node with admin JSON-RPC on `127.0.0.1:5005` and Web
 
 ## Tests
 
-In `proof/test/`, `live.mjs` and `balance.mjs` check the verifier against mainnet through your node, including forged signatures, a tampered list and tampered proof nodes, all of which must be refused. The others drive the page in headless Chrome: `tour.mjs`, `phone.mjs`, `voice.mjs`, `account.mjs`, `pencil.mjs`, `flat.mjs` and `shot.mjs`.
+In `proof/test/`, `live.mjs` and `balance.mjs` check the verifier against mainnet through your node, including forged signatures, a tampered list and tampered proof nodes, all of which must be refused. `receipt.mjs` proves transactions near and far (back to 2021 through full history) and refuses five forged receipts. The others drive the page in headless Chrome: `receipt-ui.mjs` (prove, download, re-check, a tampered PDF), `tour.mjs`, `phone.mjs`, `voice.mjs`, `flash.mjs`, `account.mjs`, `pencil.mjs`, `flat.mjs` and `shot.mjs`.
 
 ## Credits
 
