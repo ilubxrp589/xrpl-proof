@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+  // before the first paint: a tall screen gets the stacked layout (the renderer confirms it)
+  document.documentElement.classList.toggle('stacked', innerWidth / innerHeight < 1);
+</script>
+<title>Proof</title>
+<meta name="description" content="A live certificate for the XRP Ledger. Every ledger's validator signatures, checked in your own browser against one key you choose.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230c1712'/%3E%3Cpath d='M6 25h20M8 22.5h16M9 11h14l-7-5z' stroke='%23e7e9e0' stroke-width='1.6' fill='none'/%3E%3Cpath d='M10.5 12v10M14 12v10M18 12v10M21.5 12v10' stroke='%23e7e9e0' stroke-width='1.4'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<style>
+  :root {
+    --bench: #0c1712;       /* green leather under a lamp */
+    --rag: #e7e9e0;         /* cotton rag paper */
+    --rag-dim: rgba(231, 233, 224, 0.62);
+    --rag-faint: rgba(231, 233, 224, 0.34);
+    --teal: #5f9c95;        /* the underprint's first ink */
+    --rose: #c79a95;        /* and its second */
+    --rule: rgba(231, 233, 224, 0.22);
+    --serif: 'Bodoni Moda', 'Bodoni 72', Didot, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bench); color: var(--rag); overflow: hidden; }
+  body { font: 400 15px/1.5 var(--serif); font-optical-sizing: auto; -webkit-font-smoothing: antialiased; }
+  canvas#gl { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; touch-action: none; }
+  body.loupe canvas#gl { cursor: none; }
+  body.dragging canvas#gl { cursor: grabbing; }
+  #hint {
+    position: fixed; z-index: 2; top: 92px; left: 50%; transform: translateX(-50%); margin: 0;
+    font-style: italic; font-size: 14.5px; color: var(--rag-dim); pointer-events: none; text-align: center;
+    max-width: calc(100vw - 32px);
+  }
+  #hint[hidden] { display: none; }
+  /* zoomed in, the paper fills the screen: dark bands keep the controls legible */
+  .scrim { position: fixed; left: 0; right: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 0.4s ease; }
+  .scrim.top { top: 0; height: 150px; background: linear-gradient(rgba(12, 23, 18, 0.9), rgba(12, 23, 18, 0.55) 55%, rgba(12, 23, 18, 0)); }
+  .scrim.bottom { bottom: 0; height: 210px; background: linear-gradient(rgba(12, 23, 18, 0), rgba(12, 23, 18, 0.6) 40%, rgba(12, 23, 18, 0.92)); }
+  body.zoomed .scrim { opacity: 1; }
+  body.zoomed header p { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) { .scrim, header p { transition: none; } }
+  a { color: inherit; }
+
+  .ui { position: fixed; z-index: 2; pointer-events: none; }
+  .ui > * { pointer-events: auto; }
+
+  header.ui { top: 28px; left: 34px; max-width: 30rem; }
+  h1 { margin: 0; font-weight: 600; font-style: italic; font-size: 46px; line-height: 1; letter-spacing: 0.005em; }
+  header p { margin: 10px 0 0; color: var(--rag-dim); font-size: 14.5px; line-height: 1.55; max-width: 27ch; }
+
+  nav.ui { top: 30px; right: 30px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 4px; max-width: 62rem; }
+  nav .group { display: flex; gap: 2px; padding: 0 10px; border-left: 1px solid var(--rule); }
+  nav .group:first-child { border-left: 0; }
+  button {
+    font: inherit; font-size: 14.5px; color: var(--rag-dim); background: none; border: 0; cursor: pointer;
+    padding: 6px 8px 7px; position: relative; letter-spacing: 0.01em;
+  }
+  button::after {
+    content: ''; position: absolute; left: 8px; right: 8px; bottom: 3px; height: 1px;
+    background: currentColor; transform: scaleX(0); transform-origin: left; transition: transform 0.25s ease;
+  }
+  @media (hover: hover) {
+    button:hover { color: var(--rag); }
+    button:hover::after { transform: scaleX(0.35); }
+  }
+  button[aria-pressed="true"] { color: var(--rag); font-style: italic; }
+  button[aria-pressed="true"]::after { transform: scaleX(1); height: 1.5px; }
+  :focus-visible { outline: 1px solid var(--rag); outline-offset: 3px; }
+
+  footer.ui { left: 34px; right: 34px; bottom: 26px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 0.9fr); gap: 36px; align-items: end; }
+  #status { margin: 0; font-size: 17px; line-height: 1.45; max-width: 44ch; }
+  .sub { margin: 6px 0 0; color: var(--rag-dim); font-size: 13.5px; max-width: 46ch; }
+
+  form#addr-form { display: grid; gap: 6px; }
+  label { font-style: italic; color: var(--rag-dim); font-size: 14px; }
+  .field { display: flex; gap: 8px; align-items: baseline; border-bottom: 1px solid var(--rule); }
+  input {
+    flex: 1; min-width: 0; font: inherit; font-size: 15px; color: var(--rag); background: none; border: 0;
+    padding: 6px 0 7px; letter-spacing: 0.02em;
+  }
+  input::placeholder { color: var(--rag-faint); }
+  input:focus { outline: none; }
+  .field:focus-within { border-bottom-color: var(--rag-dim); }
+  #addr-note { font-size: 13px; color: var(--rag-dim); max-width: 46ch; }
+  #addr-path { font-size: 13px; color: var(--rag); letter-spacing: 0.08em; }
+
+  .trust { text-align: right; justify-self: end; }
+  .trust .k { display: block; font-size: 22px; font-style: italic; font-weight: 600; margin: 2px 0; }
+  .trust .key { font-size: 13px; color: var(--rag-dim); letter-spacing: 0.06em; }
+  .trust button { padding-right: 0; margin-right: -8px; font-size: 13.5px; }
+
+  #legend {
+    position: fixed; z-index: 3; top: 84px; right: 30px; width: min(30rem, calc(100vw - 60px));
+    background: rgba(12, 23, 18, 0.94); border: 1px solid var(--rule); padding: 22px 26px 24px;
+    backdrop-filter: none;
+  }
+  #legend h2 { margin: 0 0 12px; font-size: 24px; font-style: italic; font-weight: 600; }
+  #legend-close { position: absolute; top: 18px; right: 16px; font-size: 14px; }
+  #legend dl { margin: 0; display: grid; grid-template-columns: 7.5rem 1fr; gap: 9px 16px; font-size: 14.5px; }
+  #legend dt { font-style: italic; color: var(--rag); }
+  #legend dd { margin: 0; color: var(--rag-dim); }
+  #legend[hidden] { display: none; }
+
+  body:not(.live) nav.ui .needs-live { opacity: 0.35; pointer-events: none; }
+  body.failed #status { color: var(--rose); }
+
+  @media (max-width: 1100px) {
+    footer.ui { grid-template-columns: 1fr 1fr; }
+    .trust { grid-column: 1 / -1; justify-self: start; text-align: left; }
+  }
+  @media (prefers-reduced-motion: reduce) { button::after { transition: none; } }
+
+  /* ── the tour: a caption band in the footer's place, numbered marks on the sheet */
+  #tour-dim {
+    position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 0.6s ease;
+    background: radial-gradient(var(--rx, 40vw) var(--ry, 40vh) at var(--cx, 50%) var(--cy, 45%),
+                rgba(5, 9, 7, 0) 58%, rgba(5, 9, 7, 0.62) 100%);
+  }
+  #tour-dim.on { opacity: 1; }
+  #tour-marks { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
+  button.t-mark {
+    position: absolute; left: 0; top: 0; width: 34px; height: 34px; margin: -17px 0 0 -17px; padding: 0 1px 1px 0;
+    border-radius: 50%; display: grid; place-items: center; will-change: transform;
+    font: italic 600 17px/1 var(--serif); color: var(--rag); background: rgba(12, 23, 18, 0.93);
+    /* the sheet's corner medallions: a ring, a gap, a finer ring */
+    box-shadow: 0 0 0 1px var(--rag), 0 0 0 4px rgba(12, 23, 18, 0.93), 0 0 0 5px rgba(231, 233, 224, 0.5),
+                0 6px 18px rgba(0, 0, 0, 0.45);
+    opacity: 0; transition: opacity 0.35s ease, background-color 0.2s ease, color 0.2s ease; pointer-events: none;
+  }
+  button.t-mark::after { display: none; }
+  button.t-mark.on { opacity: 1; }
+  body[data-tour="intro"] button.t-mark.on { pointer-events: auto; }
+  body[data-tour="intro"] button.t-mark.on:hover { background: var(--rag); color: var(--bench); }
+
+  #tour {
+    position: fixed; z-index: 4; left: 0; right: 0; bottom: 0; color: var(--rag);
+    display: grid; grid-template-columns: minmax(14rem, 20rem) minmax(0, 40rem) minmax(15rem, 1fr);
+    gap: 16px 44px; align-items: start; padding: 46px 34px 26px;
+    background: linear-gradient(rgba(12, 23, 18, 0), rgba(12, 23, 18, 0.95) 36px, rgba(12, 23, 18, 0.97));
+  }
+  #tour[hidden] { display: none; }
+  /* the certificate's double rule, across the top of the band */
+  #tour::before {
+    content: ''; position: absolute; left: 34px; right: 34px; top: 30px; height: 3px;
+    border-top: 1.5px solid rgba(231, 233, 224, 0.3); border-bottom: 1px solid rgba(231, 233, 224, 0.13);
+  }
+  .t-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; }
+  /* the numeral is engraved, as the steps are numbered on the back of the sheet */
+  .t-num {
+    font: italic 700 78px/0.8 var(--serif); color: transparent; padding-right: 0.06em;
+    background: repeating-linear-gradient(rgba(231, 233, 224, 0.95) 0 1.4px, transparent 1.4px 4.2px);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-stroke: 1.1px var(--rag);
+  }
+  #tour.intro .t-num { display: none; }
+  #tour h2 { margin: 3px 0 10px; font-size: 25px; line-height: 1.16; font-weight: 600; letter-spacing: 0.004em; }
+  #tour-pips { list-style: none; margin: 0 0 0 -7px; padding: 0; display: flex; flex-wrap: wrap; }
+  #tour-pips button { font-size: 14px; padding: 3px 7px 6px; color: var(--rag-faint); }
+  #tour-pips button:hover { color: var(--rag); }
+  #tour-pips button[aria-current="step"] { color: var(--rag); font-style: italic; }
+  #tour-pips button[aria-current="step"]::after { transform: scaleX(1); height: 1.5px; }
+  #tour-body { margin: 0; font-size: 16px; line-height: 1.62; color: rgba(231, 233, 224, 0.88); max-width: 62ch; }
+  #tour-form { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; margin-top: 14px; max-width: 62ch; }
+  #tour-form[hidden] { display: none; }
+  #tour-form .field { flex: 1 1 17rem; }
+  #tour-form > button { padding-left: 0; }
+  .t-side { display: grid; gap: 10px; justify-items: start; align-content: start; }
+  #tour-live { margin: 0; font-style: italic; font-size: 14.5px; line-height: 1.5; color: var(--rag); min-height: 4.5em; max-width: 34ch; }
+  .t-nav { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; margin-left: -8px; }
+  #tour-next { color: var(--rag); font-style: italic; font-size: 16.5px; }
+  #tour-next::after { transform: scaleX(1); height: 1.5px; }
+  #tour-back[hidden] { display: none; }
+  .t-foot { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; margin-left: -8px; }
+  #tour-skip { font-size: 13.5px; color: var(--rag-faint); }
+  #tour-voice, #tour-who { font-size: 13.5px; color: var(--rag-faint); }
+  #tour-voice[aria-pressed="true"] { color: var(--rag-dim); }
+  #tour-voice[aria-pressed="true"]::after { transform: scaleX(1); opacity: 0.5; }
+  /* while the narrator speaks, its underline breathes */
+  #tour-voice[data-speaking]::after { opacity: 1; animation: speaking 1.8s ease-in-out infinite; }
+  @keyframes speaking { 0%, 100% { transform: scaleX(0.3); } 50% { transform: scaleX(1); } }
+  @media (hover: hover) { #tour-skip:hover, #tour-voice:hover, #tour-who:hover { color: var(--rag); } }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #legend .take { margin: -4px 0 14px; color: var(--rag-dim); font-size: 14px; }
+  #legend .take button { font-size: 15px; font-style: italic; color: var(--rag); padding-left: 0; }
+  #legend .take button::after { transform: scaleX(1); left: 0; }
+
+  /* while touring, the band takes the footer's place */
+  header p, footer.ui, #hint { transition: opacity 0.4s ease; }
+  body.touring header p, body.touring #hint, body.touring footer.ui { opacity: 0; }
+  body.touring footer.ui, body.touring footer.ui > * { pointer-events: none; }
+  @media (max-width: 1100px) {
+    #tour { grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr); gap: 14px 32px; }
+    .t-side { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 24px; }
+    #tour-live { min-height: 0; max-width: none; }
+    .t-nav { grid-row: 1; grid-column: 2; }
+    .t-foot { grid-column: 2; justify-self: end; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #tour-dim, button.t-mark, header p, footer.ui, #hint { transition: none; }
+    #tour-voice[data-speaking]::after { animation: none; transform: scaleX(1); }
+  }
+
+  /* ── words for fingers: only one of each pair shows */
+  .touch { display: none; }
+  @media (pointer: coarse) {
+    .touch { display: inline; }
+    .mouse { display: none; }
+    input { font-size: 16px; }          /* under 16px, iOS zooms the page on focus */
+  }
+
+  /* ── a tall screen, a phone held upright: the sheet across the top (the
+     renderer puts its bottom edge at --sheet-bottom), the words beneath it,
+     the menu along the bottom */
+  html.stacked header.ui { top: 14px; left: 16px; right: 16px; }
+  html.stacked h1 { font-size: 32px; }
+  html.stacked header p { display: none; }
+  html.stacked #hint { top: 22px; left: auto; right: 16px; transform: none; max-width: min(62vw, 26rem);
+                       text-align: right; font-size: 12.5px; line-height: 1.4; }
+  html.stacked nav.ui {
+    top: auto; bottom: 0; left: 0; right: 0; max-width: none; justify-content: center; gap: 0;
+    padding: 5px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: rgba(12, 23, 18, 0.95); border-top: 1px solid var(--rule);
+  }
+  html.stacked nav .group { padding: 0 3px; }
+  html.stacked nav button { font-size: 13px; padding: 8px 5px 9px; }
+  html.stacked .long { display: none; }
+  @media (max-width: 380px) {
+    html.stacked nav button { font-size: 12.5px; padding: 8px 4px 9px; }
+    html.stacked nav .group { padding: 0 2px; }
+  }
+  /* zoomed in, the way back sits by the title rather than growing the menu a row */
+  html.stacked #fit { position: fixed; top: 14px; right: 12px; padding: 7px 12px 8px; font-size: 14px; color: var(--rag);
+                      background: rgba(12, 23, 18, 0.9); border: 1px solid var(--rule); }
+  html.stacked #fit::after { display: none; }
+  html.stacked footer.ui {
+    top: calc(var(--sheet-bottom, calc(62px + 62vw)) + 22px); bottom: calc(var(--nav-h, 90px) + 10px);
+    left: 16px; right: 16px; display: flex; flex-direction: column; gap: 18px; align-items: stretch;
+    overflow-y: auto; overscroll-behavior: contain;
+  }
+  html.stacked #status { font-size: 16px; max-width: none; }
+  html.stacked form#addr-form { display: grid; }
+  html.stacked .trust { text-align: left; justify-self: start; }
+  html.stacked .trust .k { font-size: 19px; }
+  html.stacked body.zoomed footer.ui { opacity: 0; pointer-events: none; }
+  html.stacked body.zoomed footer.ui > * { pointer-events: none; }
+  html.stacked .scrim.bottom { display: none; }
+  html.stacked #legend {
+    inset: 0; width: auto; padding: 22px 18px calc(30px + env(safe-area-inset-bottom, 0px));
+    overflow-y: auto; overscroll-behavior: contain; border: 0; background: rgba(12, 23, 18, 0.98);
+  }
+  html.stacked #legend dl { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  html.stacked #legend dt { margin-top: 12px; }
+  html.stacked button.t-mark { width: 27px; height: 27px; margin: -13.5px 0 0 -13.5px; font-size: 14px; }
+  html.stacked #tour {
+    top: calc(var(--sheet-bottom, calc(62px + 62vw)) + 8px); bottom: 0; overflow-y: auto; overscroll-behavior: contain;
+    align-content: start;
+    grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 30px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(rgba(12, 23, 18, 0), rgba(12, 23, 18, 0.96) 22px);
+  }
+  html.stacked #tour::before { left: 16px; right: 16px; top: 16px; }
+  html.stacked .t-num { font-size: 54px; }
+  html.stacked #tour h2 { font-size: 21px; margin-bottom: 6px; }
+  html.stacked #tour-body { font-size: 15px; line-height: 1.55; }
+  html.stacked .t-side { grid-template-columns: minmax(0, 1fr); }
+  html.stacked #tour-live { min-height: 0; max-width: none; }
+  html.stacked .t-nav { grid-row: auto; grid-column: auto; }
+  html.stacked .t-foot { grid-column: auto; justify-self: start; }
+  html.stacked body.touring nav.ui { display: none; }
+
+  /* ── a short screen, a phone on its side: everything smaller, the tour beside the sheet */
+  @media (max-height: 520px) and (orientation: landscape) {
+    header.ui { top: 10px; left: 16px; }
+    h1 { font-size: 28px; }
+    header p { display: none; }
+    #hint { top: 52px; font-size: 12.5px; }
+    nav.ui { top: 8px; right: 10px; max-width: calc(100vw - 150px); }
+    nav .group { padding: 0 5px; }
+    nav button { font-size: 12.5px; padding: 4px 5px 6px; }
+    .long { display: none; }
+    footer.ui { left: 16px; right: 16px; bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+                grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: end; }
+    #status { font-size: 13px; line-height: 1.35; max-width: 70ch; }
+    .sub { font-size: 12px; margin-top: 2px; }
+    #tally { display: none; }
+    form#addr-form { display: none; }
+    .trust { grid-column: auto; justify-self: end; text-align: right; }
+    .trust .sub, .trust .key, .trust br { display: none; }
+    .trust .k { font-size: 15px; margin: 0; }
+    .trust button { font-size: 12.5px; padding: 2px 0 4px 8px; }
+    body.zoomed footer.ui { opacity: 0; pointer-events: none; }
+    body.zoomed footer.ui > * { pointer-events: none; }
+    #legend { top: 8px; bottom: 8px; overflow-y: auto; }
+    #tour {
+      left: auto; right: 0; top: 0; bottom: 0; width: min(23rem, 48vw); overflow-y: auto; align-content: start;
+      grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 16px 16px 12px; background: rgba(12, 23, 18, 0.96);
+    }
+    #tour::before { display: none; }
+    .t-num { font-size: 42px; }
+    #tour h2 { font-size: 19px; margin-bottom: 4px; }
+    #tour-body { font-size: 14px; line-height: 1.5; }
+    .t-side { grid-template-columns: minmax(0, 1fr); }
+    #tour-live { min-height: 0; }
+    .t-nav { grid-row: auto; grid-column: auto; }
+    .t-foot { grid-column: auto; justify-self: start; }
+    button.t-mark { width: 26px; height: 26px; margin: -13px 0 0 -13px; font-size: 13.5px; }
+  }
+</style>
+</head>
+<body>
+<div class="scrim top" aria-hidden="true"></div><div class="scrim bottom" aria-hidden="true"></div>
+<div id="tour-dim" aria-hidden="true"></div>
+<div id="tour-marks"></div>
+<canvas id="gl" aria-label="An engraved certificate for the latest ledger of the XRP Ledger, inked as this browser checks each validator's signature."></canvas>
+
+<header class="ui">
+  <h1>Proof</h1>
+  <p>Every few seconds the XRP Ledger closes a ledger and its validators sign it. This page checks each signature itself, in your browser, and inks the certificate only with what it has checked.</p>
+</header>
+
+<nav class="ui" aria-label="Examine the proof">
+  <div class="group" role="group" aria-label="Light">
+    <button type="button" data-mode="0" aria-pressed="true" title="1">Daylight</button>
+    <button type="button" data-mode="1" aria-pressed="false" title="2: shows the raised ink">Raking light</button>
+    <button type="button" data-mode="2" aria-pressed="false" title="3: shows the watermark">Backlight</button>
+    <button type="button" data-mode="3" aria-pressed="false" title="4: shows who signed">Ultraviolet</button>
+  </div>
+  <div class="group">
+    <button type="button" id="loupe" aria-pressed="false" title="L: read the microprint; scroll to change its power">Loupe</button>
+    <button type="button" id="turn" class="needs-live" aria-pressed="false" title="T">Turn over</button>
+    <button type="button" id="hold" class="needs-live" aria-pressed="false" title="H">Hold<span class="long"> this proof</span></button>
+    <button type="button" id="fit" hidden title="0">Whole sheet</button>
+  </div>
+  <div class="group">
+    <button type="button" id="sound" aria-pressed="false">Sound</button>
+    <button type="button" id="tour-again" class="needs-live">Tour</button>
+    <button type="button" id="help" aria-expanded="false" aria-controls="legend">How to read it</button>
+  </div>
+</nav>
+
+<p id="hint" hidden><span class="mouse">Scroll to zoom in anywhere on the sheet, and drag to move around. Press 0 for the whole sheet.</span><span class="touch">Pinch to zoom in anywhere on the sheet, and drag to move around. Double-tap for the whole sheet.</span></p>
+
+<aside id="legend" hidden aria-label="How to read the proof">
+  <h2>How to read it</h2>
+  <button type="button" id="legend-close">Close</button>
+  <p class="take"><button type="button" id="tour-start">Take the tour</button> Seven stops, about a minute.</p>
+  <dl>
+    <dt>The columns</dt><dd>One per validator on the list you trust (<span data-n>35</span> today). A column fills with ink when your browser has checked that validator’s signature on this ledger.</dd>
+    <dt>The roof</dt><dd>It goes up once <span data-q>28</span> of them have signed the same ledger. That is the quorum.</dd>
+    <dt>The dome</dt><dd>Its rays appear when the ledger’s header hashes to exactly what they signed.</dd>
+    <dt>The steps</dt><dd>The validator list itself, signed by the one key you trust.</dd>
+    <dt>The signatures</dt><dd>Each is drawn from the actual bytes that validator signed on this ledger.</dd>
+    <dt>Backlight</dt><dd>Hold the sheet to the light: the trusted key is in the paper, as a watermark.</dd>
+    <dt>Ultraviolet</dt><dd>The names of the validators whose signatures were checked fluoresce.</dd>
+    <dt>Zoom</dt><dd><span class="mouse">Scroll over</span><span class="touch">Pinch</span> any part of the sheet to bring it closer; the engraving is recut at every size, so its lines stay sharp. Drag to move. <span class="mouse">Press 0</span><span class="touch">Double-tap</span> for the whole sheet.</dd>
+  </dl>
+</aside>
+
+<footer class="ui">
+  <div>
+    <p id="status" role="status" aria-live="polite">Loading the engraver’s tools…</p>
+    <p class="sub" id="tally"></p>
+  </div>
+  <form id="addr-form" autocomplete="off">
+    <label for="addr">Look up an account</label>
+    <div class="field">
+      <input id="addr" name="addr" spellcheck="false" placeholder="r…" inputmode="latin" aria-describedby="addr-note">
+      <button type="submit">Look up</button>
+    </div>
+    <div id="addr-note" aria-live="polite"></div>
+    <div id="addr-path"></div>
+  </form>
+  <div class="trust">
+    <span class="sub">The one key this page trusts</span>
+    <span class="k" id="root-name">vl.ripple.com</span>
+    <span class="key" id="root-key"></span><br>
+    <button type="button" id="root-switch">Trust unl.xrplf.org instead</button>
+  </div>
+</footer>
+
+<section id="tour" hidden role="dialog" aria-modal="false" aria-labelledby="tour-title">
+  <div class="t-head">
+    <span class="t-num" id="tour-num" aria-hidden="true"></span>
+    <div>
+      <h2 id="tour-title"></h2>
+      <ol id="tour-pips" aria-label="Stops"></ol>
+    </div>
+  </div>
+  <div class="t-text">
+    <p id="tour-body"></p>
+    <form id="tour-form" autocomplete="off" hidden>
+      <div class="field">
+        <input id="tour-addr" spellcheck="false" placeholder="Any address, r…" aria-label="An XRP Ledger address">
+        <button type="submit">Look up</button>
+      </div>
+      <button type="button" id="tour-genesis">Try the genesis account</button>
+    </form>
+  </div>
+  <div class="t-side">
+    <p id="tour-live"></p>
+    <div class="t-nav">
+      <button type="button" id="tour-back">Back</button>
+      <button type="button" id="tour-next">Next</button>
+    </div>
+    <div class="t-foot">
+      <button type="button" id="tour-voice" aria-pressed="true">Narration</button>
+      <button type="button" id="tour-who">Switch voice</button>
+      <button type="button" id="tour-skip">Skip the tour</button>
+    </div>
+  </div>
+  <p class="sr" id="tour-say" aria-live="polite"></p>
+</section>
+
+<noscript><p style="position:fixed;inset:auto 34px 26px">This page checks the XRP Ledger in your browser, so it needs JavaScript.</p></noscript>
+<script type="module">
+  const help = document.getElementById('help'), legend = document.getElementById('legend');
+  help.addEventListener('click', () => {
+    legend.hidden = !legend.hidden;
+    help.setAttribute('aria-expanded', String(!legend.hidden));
+  });
+  addEventListener('keydown', e => { if (e.key === 'Escape' && !legend.hidden) help.click(); });
+  document.getElementById('legend-close').addEventListener('click', () => { if (!legend.hidden) help.click(); });
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
