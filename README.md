@@ -59,4 +59,6 @@ In `proof/test/`, `live.mjs` and `balance.mjs` check the verifier against mainne
 
 ## License
 
-MIT. The certificate is proof of ledger state only: not currency, and of no monetary value.
+MIT, copyright James Turner. If you use this code, keep its copyright notice, which credits James Turner and links back to this repository: https://github.com/ilubxrp589/xrpl-proof.
+
+The certificate is proof of ledger state only: not currency, and of no monetary value.
