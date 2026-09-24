@@ -1,5 +1,5 @@
 // Walk the tour in headless Chrome: a screenshot and the band's text at every
-// stop, and the genesis lookup proven (lit) on the account stop. Usage: node test/tour.mjs [outdir]   (SHOT_W/SHOT_H set the window;
+// stop, and the genesis lookup inked on the account stop. Usage: node test/tour.mjs [outdir]   (SHOT_W/SHOT_H set the window;
 // MOBILE=1 emulates a phone at that size)
 import { spawn } from 'node:child_process';
 import { writeFileSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
@@ -44,13 +44,13 @@ for (let i = 0; i <= 7; i++) {
   await settle(i === 0 ? 10 : 7);
   if (i === 6) {
     await ev(`document.getElementById('tour-genesis').click()`);
-    for (let k = 0; k < 40 && !/Lit:|Proven|Still an outline/.test(await ev(`document.getElementById('tour-live').textContent`)); k++) await sleep(1000);
+    for (let k = 0; k < 40 && !/In ink|Proven|Still in pencil/.test(await ev(`document.getElementById('tour-live').textContent`)); k++) await sleep(1000);
   }
   console.log(`stop ${i}:`, (await band()).slice(0, 420));
-  console.log('        view', await ev(`JSON.stringify({ dist: +window.__proof.view().dist.toFixed(2), names: document.getElementById('names').getAttribute('aria-pressed'), marks: [...document.querySelectorAll('.t-mark.on')].map(m => m.textContent + '@' + m.style.transform.replace(/translate|px|\\(|\\)/g, '')).join(' ') })`));
+  console.log('        zoom', await ev(`JSON.stringify({ zoom: +document.body.classList.contains('zoomed'), mode: document.body.dataset.light, marks: [...document.querySelectorAll('.t-mark.on')].map(m => m.textContent + '@' + m.style.transform.replace(/translate|px|\\(|\\)/g, '')).join(' ') })`));
   await shot(`stop-${i}`);
 }
 await ev(`document.getElementById('tour-next').click()`);   // Done
 await sleep(1500);
-console.log('after:', await ev(`JSON.stringify({ touring: document.body.classList.contains('touring'), hidden: document.getElementById('tour').hidden, seen: localStorage.getItem('proof.toured'), names: document.getElementById('names').getAttribute('aria-pressed') })`));
+console.log('after:', await ev(`JSON.stringify({ touring: document.body.classList.contains('touring'), hidden: document.getElementById('tour').hidden, seen: localStorage.getItem('proof.toured'), light: document.body.dataset.light })`));
 ws.close(); chrome.kill('SIGKILL'); process.exit(0);

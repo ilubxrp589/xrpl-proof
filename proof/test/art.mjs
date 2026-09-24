@@ -87,18 +87,12 @@ const send = (method, params = {}) => new Promise(r => { const i = ++id; pending
 await send('Runtime.enable'); await send('Page.enable');
 await send('Page.navigate', { url: process.env.URL || 'http://127.0.0.1:8791/test/art.html' });
 for (let i = 0; i < 60; i++) { if ((await send('Runtime.evaluate', { expression: 'window.ready === true', returnByValue: true })).result?.value) break; await sleep(250); }
-for (const style of (process.env.STYLES || 'space,engraved').split(',')) {
+for (const style of ['space', 'engraved']) {
   for (const [name, v] of Object.entries(vs)) {
-    const t0 = Date.now();
-    const r = await Promise.race([send('Runtime.evaluate', { expression: `draw(${JSON.stringify(v)}, '${style}')`, awaitPromise: true, returnByValue: true }),
-                                  sleep(120000).then(() => ({ timedOut: true }))]);
-    if (r.timedOut) { console.log(style, name, 'NOT DRAWN: no answer in 120 s'); continue; }
-    const n = r.result?.value;
-    if (typeof n !== 'number') { console.log(style, name, 'NOT DRAWN', JSON.stringify(r).slice(0, 300)); continue; }
-    let url = '';
-    for (let i = 0; i < n; i += 1 << 20) url += (await send('Runtime.evaluate', { expression: `window.out.slice(${i}, ${i + (1 << 20)})`, returnByValue: true })).result.value;
+    const r = await send('Runtime.evaluate', { expression: `draw(${JSON.stringify(v)}, '${style}')`, awaitPromise: true, returnByValue: true });
+    const url = r.result?.value;
+    if (!url || !url.startsWith('data:image/png')) { console.log(style, name, 'NOT DRAWN', JSON.stringify(r).slice(0, 300)); continue; }
     writeFileSync(`${out}/${style}-${name}.png`, Buffer.from(url.split(',')[1], 'base64'));
-    console.log(style, name, `drawn in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   }
   console.log(style, 'drawn:', Object.keys(vs).join(', '));
 }

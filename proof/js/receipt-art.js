@@ -1,7 +1,7 @@
 /* The receipt, drawn for printing: an A4 sheet at 200 dpi in the certificate's
  * engraved style. Everything on it comes from a checked receipt (the result
  * of verifyReceipt), never from what the relay said. */
-import { text, fontSpec, canvas, rng, hexBytes, xrpText, rosette, braid, micro, fit, INK, TEAL, ROSE } from './engrave.js';
+import { text, fontSpec, canvas, rng, hexBytes, xrpText, rosette, braid, micro, fit, INK, TEAL, ROSE } from './note.js';
 
 export const RW = 1654, RH = 2339;
 const PAPER = '#F6F4EA', SOFT = 'rgba(34,27,48,0.62)', FAINT = 'rgba(62,125,120,0.22)';
