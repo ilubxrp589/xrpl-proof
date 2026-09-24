@@ -10,7 +10,7 @@ import { program, uniforms, texture, canvasTexture, target, bindTarget, mesh, gr
 import * as S from './shaders.js';
 import { buildTholos, PART, N_COLS, scopeDir } from './tholos.js';
 import { W, H, L } from './note.js';
-import { spyglass, SPYGLASS } from './props.js';
+import { spyglass, SPYGLASS, clawStand, CLAW, hangingStand, HANG } from './props.js';
 
 const SHEET = [60, 40];                 // world size of the sheet, 3 : 2
 const NOTE_POS = [0, 25, 0];
@@ -44,8 +44,10 @@ export class Renderer {
     if (night) {
       this.pAstro = P(S.ASTRO_VS, S.ASTRO_FS, 'astro');
       this.pSpy = P(S.SPY_VS, S.SPY_FS, 'spyglass');
-      const sp = spyglass();
-      this.spy = mesh(gl, [[sp.pos, 3], [sp.nrm, 3], [sp.uv, 2], [sp.part, 1]], sp.idx);
+      this.pProp = P(S.SPY_VS, S.PROP_FS, 'stands');
+      const mk = g => mesh(gl, [[g.pos, 3], [g.nrm, 3], [g.uv, 2], [g.part, 1]], g.idx);
+      this.spy = mk(spyglass()); this.claw = mk(clawStand()); this.hang = mk(hangingStand());
+      this.layoutProps();
     }
     this.emptyVao = gl.createVertexArray();
 
@@ -137,7 +139,7 @@ export class Renderer {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       }
-      this.astro = { mesh: mesh(gl, [[pos, 3], [nrm, 3]], idx), a: ta, s: ts, shadow: this.depthTarget(1024) };
+      this.astro = { mesh: mesh(gl, [[pos, 3], [nrm, 3]], idx), a: ta, s: ts };
     }).catch(() => { /* a bare desk */ });
   }
 
@@ -164,6 +166,32 @@ export class Renderer {
     const free = () => { gl.deleteFramebuffer(fb); rb.forEach(r => gl.deleteRenderbuffer(r)); };
     if (!ok) { free(); return null; }
     return { fb, w, h, samples: n, free };
+  }
+
+  /** Where the night desk's things stand. Right of the sheet, the astrolabe hangs from
+   *  its stand, turned toward the room; left of it, the telescope on its pillar and claw,
+   *  tilted up 12° and aimed back and away, out of the picture. */
+  layoutProps() {
+    const pl = this.props = {};
+    const yaw = -0.62;                              // its face turned a little toward the sheet
+    pl.hang = M.mul(M.translate(68, 0, -58), M.rotY(yaw));
+    // the astrolabe's mesh is built at 16 world units to its maps' blender unit; it hangs
+    // at 12, face out along the stand's +z, the top of its ring in the last link of the chain
+    const k = 12 / 16, ring = [0, 0.36, -22.5];
+    pl.astro = M.mul(pl.hang, M.mul(M.translate(...HANG.ring), M.mul(M.scale(k, k, k),
+                     M.mul(M.rotX(Math.PI / 2), M.translate(-ring[0], -ring[1], -ring[2])))));
+    const pc = M.apply(pl.hang, [0, 0, 0]);
+    pl.plinth = [pc[0], pc[2], yaw, 0];
+    pl.plinthR = HANG.plinth;
+    pl.claw = M.mul(M.translate(-62, 0, -42), M.rotY(-3 * Math.PI / 4));
+    pl.spy = M.mul(pl.claw, M.mul(M.translate(0, CLAW.pivot, 0), M.mul(M.rotY(-Math.PI / 2),
+                   M.mul(M.rotZ(0.21), M.translate(-SPYGLASS.pivot, -SPYGLASS.radius, 0)))));
+    pl.pads = CLAW.pads.flatMap(([x, z]) => { const p = M.apply(pl.claw, [x, 0, z]); return [p[0], p[2]]; });
+    // the middle of each group, for its lamp's-eye depth map (each reaches ~30 from it)
+    pl.aMid = M.apply(pl.hang, [3, 26, 0]);
+    pl.bMid = M.apply(pl.claw, [0, 16, -7]);
+    this.shadowA = this.depthTarget(1024);
+    this.shadowB = this.depthTarget(1024);
   }
 
   depthTarget(n) {
@@ -451,33 +479,32 @@ export class Renderer {
     gl.bindVertexArray(this.emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // 3b. the astrolabe on the night desk: where it lies, and its depth seen from the lamp
-    const as = this.night && this.astro;
-    let aModel, aInv, aLVP;
-    if (as) {
-      // left of the sheet, its ring and shackle trailing back behind the sheet's edge
-      aModel = M.mul(M.translate(-59.93, 0, -49.62), M.rotY(-0.5));
-      aInv = M.invert(aModel);
-      const c = M.apply(aModel, [0, 1.5, 6.4]), dist = Math.hypot(lamp[0] - c[0], lamp[1] - c[1], lamp[2] - c[2]);
-      const lv = M.lookAt(lamp, c, [0, 1, 0]);
-      aLVP = M.mul(M.perspective(2 * Math.atan(31 / dist), 1, Math.max(1, dist - 40), dist + 40), lv);
+    // 3b. the night desk's things (not on a phone, whose frame they stand outside): each
+    // group's depth, seen from the lamp, for the shadows they cast on the desk and on themselves
+    const props = this.night && !this.phone && this.props;
+    const as = props && this.astro;
+    const lampView = (mid, reach) => {
+      const v = [mid[0] - lamp[0], mid[1] - lamp[1], mid[2] - lamp[2]], dist = Math.hypot(...v);
+      const up = Math.abs(v[1] / dist) > 0.95 ? [0, 0, 1] : [0, 1, 0];
+      return M.mul(M.perspective(2 * Math.atan(reach / dist), 1, Math.max(1, dist - reach - 4), dist + reach + 4), M.lookAt(lamp, mid, up));
+    };
+    let aLVP, bLVP;
+    if (props) {
+      aLVP = lampView(props.aMid, 35); bLVP = lampView(props.bMid, 31);
       gl.enable(gl.DEPTH_TEST);
-      bindTarget(gl, as.shadow);
-      gl.clear(gl.DEPTH_BUFFER_BIT);
       gl.useProgram(this.pShadow.p);
-      uniforms(gl, this.pShadow, { uLightVP: aLVP, uModel: aModel });
-      as.mesh.draw();
+      bindTarget(gl, this.shadowA);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      if (as) {
+        uniforms(gl, this.pShadow, { uLightVP: aLVP, uModel: props.astro }); as.mesh.draw();
+        uniforms(gl, this.pShadow, { uLightVP: aLVP, uModel: props.hang }); this.hang.draw();
+      }
+      bindTarget(gl, this.shadowB);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      uniforms(gl, this.pShadow, { uLightVP: bLVP, uModel: props.spy }); this.spy.draw();
+      uniforms(gl, this.pShadow, { uLightVP: bLVP, uModel: props.claw }); this.claw.draw();
     }
-
-    // the spyglass: right of the sheet, lying back from its object glass
-    let sModel, spyA, spyB;
-    if (this.night && !this.phone) {
-      const A = [88, -70], dx = -42, dz = 30.4, l = Math.hypot(dx, dz), dir = [dx / l, dz / l];
-      sModel = M.mul(M.translate(A[0], 0, A[1]), M.rotY(Math.atan2(-dir[1], dir[0])));
-      const r = SPYGLASS.radius, len = SPYGLASS.length;
-      spyA = [A[0], r, A[1], r];
-      spyB = [A[0] + dir[0] * len, r, A[1] + dir[1] * len, 1];
-    }
+    const noteInv = M.invert(nm);
 
     // 4. scene
     const drawScene = (vp, eye) => {
@@ -487,36 +514,40 @@ export class Renderer {
       gl.useProgram(this.pBench.p);
       uniforms(gl, this.pBench, {
         uVP: vp, uSize: 700, uLamp: lamp, uLampCol: lampCol, uEye: eye,
-        uNoteInv: M.invert(nm), uNoteSize: SHEET, uMode: { int: st.mode },
+        uNoteInv: noteInv, uNoteSize: SHEET, uMode: { int: st.mode },
         ...(this.night ? {
           uDeskOn: this.desk ? 1 : 0,
           uWood: { tex: this.desk ? this.desk.wood : this.tPlate, unit: 9 },
           uWoodS: { tex: this.desk ? this.desk.woodS : this.tPlate, unit: 10 },
           uLeatherS: { tex: this.desk ? this.desk.leatherS : this.tPlate, unit: 11 },
-          uAstroOn: as ? 1 : 0,
-          uAstroA: { tex: as ? as.a : this.tPlate, unit: 12 },
-          uAstroShadow: { tex: as ? as.shadow.tex : this.shadow.tex, unit: 13 },
-          ...(as ? { uAstroLVP: aLVP, uAstroInv: aInv } : {}),
-          uSpyA: spyA || [0, 0, 0, 1], uSpyB: spyB || [0, 0, 0, 0],
+          uPropsOn: props ? 1 : 0,
+          uShadowA: { tex: (props ? this.shadowA : this.shadow).tex, unit: 12 },
+          uShadowB: { tex: (props ? this.shadowB : this.shadow).tex, unit: 13 },
+          ...(props ? { uShadowALVP: aLVP, uShadowBLVP: bLVP, uPlinth: props.plinth, uPlinthR: props.plinthR, uPads: { vec2: props.pads } } : {}),
         } : {}),
       });
       this.bench.draw();
-      if (as) {
-        gl.useProgram(this.pAstro.p);
-        uniforms(gl, this.pAstro, {
-          uVP: vp, uModel: aModel, uAstroLVP: aLVP, uLamp: lamp, uLampCol: lampCol, uEye: eye,
-          uNoteInv: M.invert(nm), uNoteSize: SHEET, uMode: { int: st.mode },
-          uAstroA: { tex: as.a, unit: 9 }, uAstroS: { tex: as.s, unit: 10 }, uAstroShadow: { tex: as.shadow.tex, unit: 11 },
-        });
-        as.mesh.draw();
-      }
-      if (sModel) {
+      if (props) {
+        const common = { uVP: vp, uLamp: lamp, uLampCol: lampCol, uEye: eye, uNoteInv: noteInv, uNoteSize: SHEET, uMode: { int: st.mode } };
+        const wood = { uWood: { tex: this.desk ? this.desk.wood : this.tPlate, unit: 9 }, uWoodOn: this.desk ? 1 : 0 };
+        if (as) {
+          // the astrolabe, hanging, and its stand and chains
+          gl.useProgram(this.pAstro.p);
+          uniforms(gl, this.pAstro, { ...common, uModel: props.astro, uAstroLVP: aLVP,
+            uAstroA: { tex: as.a, unit: 9 }, uAstroS: { tex: as.s, unit: 10 }, uAstroShadow: { tex: this.shadowA.tex, unit: 11 } });
+          as.mesh.draw();
+          gl.useProgram(this.pProp.p);
+          uniforms(gl, this.pProp, { ...common, ...wood, uModel: props.hang, uShadowLVP: aLVP, uShadow: { tex: this.shadowA.tex, unit: 11 } });
+          this.hang.draw();
+        }
+        // the telescope and its stand
+        gl.useProgram(this.pProp.p);
+        uniforms(gl, this.pProp, { ...common, ...wood, uModel: props.claw, uShadowLVP: bLVP, uShadow: { tex: this.shadowB.tex, unit: 11 } });
+        this.claw.draw();
         gl.useProgram(this.pSpy.p);
-        uniforms(gl, this.pSpy, {
-          uVP: vp, uModel: sModel, uRadius: SPYGLASS.radius, uLamp: lamp, uLampCol: lampCol, uEye: eye,
-          uNoteInv: M.invert(nm), uNoteSize: SHEET, uMode: { int: st.mode },
-          uLeatherS: { tex: this.desk ? this.desk.leatherS : this.tPlate, unit: 9 }, uLeatherOn: this.desk ? 1 : 0,
-        });
+        uniforms(gl, this.pSpy, { ...common, uModel: props.spy, uRadius: SPYGLASS.radius, uShadowLVP: bLVP,
+          uShadow: { tex: this.shadowB.tex, unit: 11 },
+          uLeatherS: { tex: this.desk ? this.desk.leatherS : this.tPlate, unit: 9 }, uLeatherOn: this.desk ? 1 : 0 });
         this.spy.draw();
       }
       gl.useProgram(this.pNote.p);

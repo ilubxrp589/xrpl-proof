@@ -498,6 +498,19 @@ float sheetShadow(vec3 P, vec3 L){
   return 1.0 - 0.82 * inside * step(0.0, t);
 }`;
 
+// a lamp's-eye depth map: how much of the lamp reaches P past what was drawn into it
+const MAP_SHADOW = `
+float mapShadow(highp sampler2D m, mat4 lvp, vec3 P){
+  vec4 ls = lvp * vec4(P, 1.0);
+  vec3 p = ls.xyz / ls.w * 0.5 + 0.5;
+  if(p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0 || p.z > 1.0) return 1.0;
+  vec2 texel = 1.0 / vec2(textureSize(m, 0));
+  float s = 0.0;
+  for(int i = -1; i <= 1; i++) for(int j = -1; j <= 1; j++)
+    s += (p.z - 0.0012 > texture(m, p.xy + vec2(i, j) * texel * 1.5).r) ? 0.0 : 1.0;
+  return s / 9.0;
+}`;
+
 // the night desk's gloss: a microfacet highlight (GGX, Smith, Schlick), in the page's lamp units
 const GLOSS = `
 vec3 gloss(vec3 N, vec3 L, vec3 V, vec3 F0, float rough){
@@ -529,33 +542,13 @@ uniform int uMode;
 #ifdef NIGHT
 uniform sampler2D uWood, uWoodS, uLeatherS;   // photographed: the wood's colour; its normal (x, y) + roughness; the leather's
 uniform float uDeskOn;
-uniform sampler2D uAstroA;                     // the astrolabe's colour, its outline in alpha
-uniform highp sampler2D uAstroShadow;          // its depth, seen from the lamp
-uniform mat4 uAstroLVP, uAstroInv;
-uniform float uAstroOn;
-uniform vec4 uSpyA, uSpyB;    // the spyglass's axis, eyepiece to object glass (xyz), its radius (A.w), drawn (B.w)
-// how much of the lamp the spyglass leaves this point: the ray to the lamp against its tube
-float spyShadow(vec3 P, vec3 L){
-  vec3 A = uSpyA.xyz, v = uSpyB.xyz - uSpyA.xyz, w = P - A;
-  float b = dot(L, v), c = dot(v, v), dd = dot(L, w), e = dot(v, w);
-  float D = c - b * b;
-  float tc = clamp((e - b * dd) / max(D, 1e-4), 0.0, 1.0);
-  vec3 Q = A + v * tc;
-  float sc = dot(Q - P, L);
-  if(sc <= 0.0) return 1.0;
-  float dist = length(P + L * sc - Q), pen = 0.2 + 0.045 * sc;
-  return smoothstep(uSpyA.w - pen, uSpyA.w + pen, dist);
-}
-float astroShadow(vec3 P){
-  vec4 ls = uAstroLVP * vec4(P, 1.0);
-  vec3 p = ls.xyz / ls.w * 0.5 + 0.5;
-  if(p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0 || p.z > 1.0) return 1.0;
-  vec2 texel = 1.0 / vec2(textureSize(uAstroShadow, 0));
-  float s = 0.0;
-  for(int i = -1; i <= 1; i++) for(int j = -1; j <= 1; j++)
-    s += (p.z - 0.0008 > texture(uAstroShadow, p.xy + vec2(i, j) * texel * 1.5).r) ? 0.0 : 1.0;
-  return s / 9.0;
-}
+uniform highp sampler2D uShadowA, uShadowB;   // the two stands and what they hold, seen from the lamp
+uniform mat4 uShadowALVP, uShadowBLVP;
+uniform float uPropsOn;
+uniform vec4 uPlinth;                          // the astrolabe stand's oval plinth: centre x, z, its turn
+uniform vec2 uPlinthR;                         // and its half-length, half-width
+uniform vec2 uPads[3];                         // the telescope stand's three pads
+` + MAP_SHADOW + `
 #endif
 ` + SHEET_SHADOW + GLOSS + `
 out vec4 o;
@@ -605,23 +598,17 @@ void main(){
   base = mix(base, vec3(0.62, 0.46, 0.2), tool);
   vec3 N = inB > 0.5 ? Nl : Nw;
   float rough = mix(mix(wr, lr, inB), 0.3, tool);
-  // what lies on the desk: the astrolabe's shadow from the lamp, and the dark close under its rim
+  // what stands on the desk: the two stands' shadows from the lamp, and the dark close
+  // round the plinth and under the claw's pads, where the desk sees less of the room
   float lit = shadow;
   float occ = 1.0;
-  if(uSpyB.w > 0.5){
-    lit *= spyShadow(vW, L);
-    // close along the tube, where it rests, the desk sees less of the room
-    vec2 ga = uSpyA.xz, gv = uSpyB.xz - uSpyA.xz;
-    float h = length(vW.xz - (ga + gv * clamp(dot(vW.xz - ga, gv) / dot(gv, gv), 0.0, 1.0)));
-    occ *= 1.0 - 0.6 * smoothstep(uSpyA.w * 1.7, uSpyA.w * 0.5, h);
-  }
-  if(uAstroOn > 0.5){
-    vec3 la = (uAstroInv * vec4(vW, 1.0)).xyz;
-    if(abs(la.x) < 44.0 && abs(la.z) < 44.0){
-      lit *= astroShadow(vW);
-      vec2 auv = la.xz / 48.0 + 0.5;
-      occ = 1.0 - 0.55 * textureLod(uAstroA, auv, 4.5).a - 0.3 * textureLod(uAstroA, auv, 6.5).a;
-    }
+  if(uPropsOn > 0.5){
+    lit *= mapShadow(uShadowA, uShadowALVP, vW) * mapShadow(uShadowB, uShadowBLVP, vW);
+    vec2 pd = vW.xz - uPlinth.xy;
+    float pc = cos(uPlinth.z), ps = sin(uPlinth.z);
+    float pe = length(vec2(pc * pd.x - ps * pd.y, ps * pd.x + pc * pd.y) / uPlinthR);   // 1 at the plinth's edge
+    occ *= 1.0 - 0.55 * smoothstep(1.2, 0.97, pe);
+    for(int i = 0; i < 3; i++) occ *= 1.0 - 0.5 * smoothstep(1.7, 0.3, length(vW.xz - uPads[i]));
   }
   vec3 F0 = mix(vec3(0.04), vec3(0.62, 0.46, 0.2), tool);
   // (the shadows keep a little fill light for the diffuse; a highlight is the lamp's own
@@ -657,27 +644,29 @@ layout(location=1) in vec3 aNrm;
 layout(location=2) in vec2 aUv;      // round the tube (0..1), along it (world units)
 layout(location=3) in float aPart;
 uniform mat4 uVP, uModel;
-out vec3 vW, vN, vM;
+out vec3 vW, vN, vM, vMN;
 out vec2 vUv;
 flat out int vPart;
 void main(){
   vec4 w = uModel * vec4(aPos, 1.0);
-  vW = w.xyz; vN = mat3(uModel) * aNrm; vM = aPos; vUv = aUv;
+  vW = w.xyz; vN = mat3(uModel) * aNrm; vM = aPos; vMN = aNrm; vUv = aUv;
   vPart = int(aPart + 0.5);
   gl_Position = uVP * w;
 }`;
 export const SPY_FS = HEAD + NOISE + `
-in vec3 vW, vN, vM;
+in vec3 vW, vN, vM, vMN;
 in vec2 vUv;
 flat in int vPart;
 uniform sampler2D uLeatherS;
+uniform highp sampler2D uShadow;
+uniform mat4 uShadowLVP;
 uniform float uLeatherOn, uRadius;
 uniform mat4 uModel, uNoteInv;
 uniform vec2 uNoteSize;
 uniform vec3 uLamp, uLampCol, uEye;
 uniform int uMode;
 out vec4 o;
-` + SHEET_SHADOW + GLOSS + `
+` + SHEET_SHADOW + GLOSS + MAP_SHADOW + `
 void main(){
   vec3 N = normalize(vN);
   mat3 R = mat3(uModel);
@@ -709,9 +698,57 @@ void main(){
   float d = length(uLamp - vW);
   float pool = 1.6 / (1.0 + 0.0006 * d * d);
   vec3 V = normalize(uEye - vW);
-  float lit = sheetShadow(vW, L);
+  float lit = sheetShadow(vW, L) * mapShadow(uShadow, uShadowLVP, vW + normalize(vN) * 0.05);
   vec3 F0 = mix(vec3(0.04), alb, metal);
   if(vPart == 3) F0 = vec3(0.035, 0.022, 0.06);       // a bloomed lens reflects violet
+  float nv = max(dot(N, V), 0.0);
+  vec3 Fr = F0 + (max(vec3(1.0 - rough), F0) - F0) * pow(1.0 - nv, 5.0);
+  vec3 col = (gloss(N, L, V, F0, rough) * lit * lit + alb * (1.5 - 1.2 * metal) * max(dot(N, L), 0.0)) * pool * lit * uLampCol
+           + Fr * room(reflect(-V, N), rough, L, uLampCol)
+           + alb * (1.0 - metal) * 0.12 * uLampCol;
+  if(uMode == 3) col *= vec3(0.3, 0.2, 0.75) * 0.6;
+  if(uMode == 2) col *= 0.3;
+  o = vec4(mix(vec3(0.0016, 0.003, 0.009), col, smoothstep(300.0, 70.0, length(vW.xz))), 1.0);
+}`;
+
+// ── the stands: turned brass, a chain, a plinth of French-polished mahogany ───
+export const PROP_FS = HEAD + NOISE + `
+in vec3 vW, vN, vM, vMN;
+in vec2 vUv;
+flat in int vPart;
+uniform sampler2D uWood;
+uniform highp sampler2D uShadow;
+uniform mat4 uShadowLVP, uNoteInv;
+uniform float uWoodOn;
+uniform vec2 uNoteSize;
+uniform vec3 uLamp, uLampCol, uEye;
+uniform int uMode;
+out vec4 o;
+` + SHEET_SHADOW + GLOSS + MAP_SHADOW + `
+void main(){
+  vec3 N = normalize(vN);
+  // brass, kept polished: a faint warmth of tarnish drifting over it
+  float t = noise(vM.xz * 0.33 + vM.y * 0.21) * 0.6 + noise(vM.xy * 1.4 + vM.z * 0.9) * 0.4;
+  vec3 alb = mix(vec3(0.84, 0.64, 0.30), vec3(0.58, 0.40, 0.16), smoothstep(0.4, 0.85, t));
+  float metal = 1.0, rough = mix(0.2, 0.32, t);
+  if(vPart == 1) rough += 0.08;                       // milled
+  if(vPart == 6){ alb *= 0.9; rough = mix(0.26, 0.38, t); }  // the chain: handled, a little duller
+  if(vPart == 5){
+    // mahogany: the desk's own photographed grain, run the way a turner's would, darker
+    // and redder, under a French polish that holds a sharp image of the lamp
+    vec3 w = abs(normalize(vMN)); w /= w.x + w.y + w.z;
+    vec3 g = uWoodOn > 0.5
+      ? texture(uWood, vM.zy / 90.0 + 0.21).rgb * w.x + texture(uWood, vM.xz / 90.0 + 0.53).rgb * w.y + texture(uWood, vM.xy / 90.0 + 0.77).rgb * w.z
+      : vec3(0.45, 0.25, 0.16);
+    alb = pow(g, vec3(2.2)) * vec3(0.72, 0.42, 0.34);
+    metal = 0.0; rough = 0.1;
+  }
+  vec3 L = normalize(uLamp - vW);
+  float d = length(uLamp - vW);
+  float pool = 1.6 / (1.0 + 0.0006 * d * d);
+  vec3 V = normalize(uEye - vW);
+  float lit = sheetShadow(vW, L) * mapShadow(uShadow, uShadowLVP, vW + N * 0.05);
+  vec3 F0 = mix(vec3(0.04), alb, metal);
   float nv = max(dot(N, V), 0.0);
   vec3 Fr = F0 + (max(vec3(1.0 - rough), F0) - F0) * pow(1.0 - nv, 5.0);
   vec3 col = (gloss(N, L, V, F0, rough) * lit * lit + alb * (1.5 - 1.2 * metal) * max(dot(N, L), 0.0)) * pool * lit * uLampCol
@@ -730,16 +767,16 @@ export const ASTRO_VS = HEAD + `
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNrm;
 uniform mat4 uVP, uModel;
-out vec3 vW, vN;
+out vec3 vW, vN, vMN;
 out vec2 vUv;
 void main(){
   vec4 w = uModel * vec4(aPos, 1.0);
-  vW = w.xyz; vN = mat3(uModel) * aNrm;
+  vW = w.xyz; vN = mat3(uModel) * aNrm; vMN = aNrm;
   vUv = aPos.xz / 48.0 + 0.5;
   gl_Position = uVP * w;
 }`;
 export const ASTRO_FS = HEAD + `
-in vec3 vW, vN;
+in vec3 vW, vN, vMN;
 in vec2 vUv;
 uniform sampler2D uAstroA, uAstroS;
 uniform highp sampler2D uAstroShadow;
@@ -748,24 +785,14 @@ uniform vec2 uNoteSize;
 uniform vec3 uLamp, uLampCol, uEye;
 uniform int uMode;
 out vec4 o;
-` + SHEET_SHADOW + GLOSS + `
-float astroShadow(vec3 P){
-  vec4 ls = uAstroLVP * vec4(P, 1.0);
-  vec3 p = ls.xyz / ls.w * 0.5 + 0.5;
-  if(p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0 || p.z > 1.0) return 1.0;
-  vec2 texel = 1.0 / vec2(textureSize(uAstroShadow, 0));
-  float s = 0.0;
-  for(int i = -1; i <= 1; i++) for(int j = -1; j <= 1; j++)
-    s += (p.z - 0.0015 > texture(uAstroShadow, p.xy + vec2(i, j) * texel * 1.5).r) ? 0.0 : 1.0;
-  return s / 9.0;
-}
+` + SHEET_SHADOW + GLOSS + MAP_SHADOW + `
 void main(){
   vec3 gN = normalize(vN);
   vec4 A = texture(uAstroA, vUv);
   vec3 S = texture(uAstroS, vUv).rgb;
   vec2 nxy = S.rg * 2.0 - 1.0;
   vec3 tN = normalize(mat3(uModel) * vec3(nxy.x, sqrt(max(0.0, 1.0 - dot(nxy, nxy))), -nxy.y));
-  float top = smoothstep(0.55, 0.9, gN.y);            // the maps hold what is seen from above
+  float top = smoothstep(0.55, 0.9, normalize(vMN).y);   // the maps hold what faces out of its face
   vec3 N = normalize(mix(gN, tN, top));
   // a wall has no view from above: it takes the brass round about it (a coarse level of the
   // map, over its coverage), not the rim's last texels drawn down its face
@@ -777,7 +804,7 @@ void main(){
   float d = length(uLamp - vW);
   float pool = 1.6 / (1.0 + 0.0006 * d * d);
   vec3 V = normalize(uEye - vW);
-  float lit = sheetShadow(vW, L) * astroShadow(vW + gN * 0.06);
+  float lit = sheetShadow(vW, L) * mapShadow(uAstroShadow, uAstroLVP, vW + gN * 0.06);
   vec3 F0 = mix(vec3(0.04), alb, metal);
   float nv = max(dot(N, V), 0.0);
   vec3 Fr = F0 + (max(vec3(1.0 - rough), F0) - F0) * pow(1.0 - nv, 5.0);

@@ -81,6 +81,9 @@ def build(lo):
 
     def prism(name, pts, z0, z1, kind):
         """A flat shape (a list of (x, y) around its outline) given a thickness."""
+        # its faces point out only if the outline runs counter-clockwise: turn it if not
+        if sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts))) < 0:
+            pts = pts[::-1]
         n = len(pts)
         v = [(x, y, z0) for x, y in pts] + [(x, y, z1) for x, y in pts]
         f = [tuple(range(n - 1, -1, -1)), tuple(range(n, 2 * n))]
