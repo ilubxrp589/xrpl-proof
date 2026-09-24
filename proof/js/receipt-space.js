@@ -18,7 +18,7 @@
  * The sky is the transaction's own, drawn from its hash. The canvas comes back
  * with .layer, every word drawn and where, so the PDF can lay the same words
  * under the picture as real text: invisible, but selectable and searchable. */
-import { rng, hexBytes } from './note.js';
+import { rng, hexBytes } from './engrave.js';
 import { amountText, headline, utc } from './receipt-art.js';
 
 export const RW = 1654, RH = 2339;

@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sky</title>
+<style>html, body { margin: 0; height: 100%; background: #01030A; overflow: hidden; } canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }</style>
+<canvas id="c"></canvas>
+<script type="module">
+  // The scene alone, with made-up events, for looking at it: ?stage=full|told|absent|build|empty
+  import { Sky, HOME } from '../js/scene.js';
+  const q = new URLSearchParams(location.search), stage = q.get('stage') || 'full', n = +(q.get('n') || 35);
+  const sky = new Sky(document.getElementById('c'));
+  const rnd = (s => () => (s = (s * 16807) % 2147483647) / 2147483647)(7);
+  const validators = Array.from({ length: n }, (_, i) => ({ master: 'ED' + [...Array(64)].map(() => '0123456789ABCDEF'[Math.floor(rnd() * 16)]).join(''), domain: `validator${i}.example` }));
+  const sig = () => Uint8Array.from({ length: 70 }, () => Math.floor(rnd() * 256));
+  const box = [+(q.get('bx0') || 360), +(q.get('by0') || 90), innerWidth - 30, innerHeight - 150];
+  Object.assign(sky.view, sky.frameSphere(HOME.centre, +(q.get('r') || HOME.radius), box, +(q.get('yaw') || HOME.yaw), +(q.get('pitch') || HOME.pitch)));
+  const run = (sec, dt = 0.05) => { for (let t = 0; t < sec; t += dt) sky.advance(dt); };
+  if (stage !== 'empty') { sky.setList(validators); run(3.5); }
+  if (stage === 'build') { sky.setList(validators); run(+(q.get('at') || 1.2)); }
+  else if (stage !== 'empty') {
+    for (let k = 0; k < +(q.get('rings') || 12); k++) { sky.begin(); for (let i = 0; i < n; i++) if (rnd() > 0.06) sky.signed(i, sig()); sky.quorum(true); run(0.6); sky.header(); run(3.4); }
+    sky.begin(); const skip = new Set([3, 11, 24]);
+    for (let i = 0; i < n; i++) if (!skip.has(i)) sky.signed(i, sig());
+    sky.quorum(true); run(1.2); sky.header(); run(1.5);
+    const path = ['5', 'C', '0', '7', 'A', '3'];
+    if (stage === 'told') sky.account({ addr: 'r1', state: 'told' });
+    if (stage === 'full') sky.account({ addr: 'r1', state: 'proven', path });
+    if (stage === 'absent') sky.account({ addr: 'r1', state: 'absent', path: path.slice(0, 4) });
+    run(3);
+  }
+  const loop = () => { sky.frame(0.016); window.frames = (window.frames || 0) + 1; requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+  window.sky = sky; window.ready = true;
+</script>

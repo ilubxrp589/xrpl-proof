@@ -22,7 +22,7 @@ const flags = [
 ];
 import { openSync } from 'node:fs';
 const errlog = openSync(`${out}/chrome.log`, 'w');
-const chrome = spawn('google-chrome', [...flags, url], { stdio: ['ignore', errlog, errlog] });
+const chrome = spawn(process.env.CHROME || 'google-chrome', [...flags, url], { stdio: ['ignore', errlog, errlog] });
 chrome.on('exit', (c, sig) => console.log('[chrome exited]', c, sig));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let list, port;

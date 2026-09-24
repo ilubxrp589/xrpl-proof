@@ -14,7 +14,7 @@ const t = txs.find(x => x.tx_blob.startsWith('120000')) || txs[0];
 const hash = Buffer.from(sha512(Buffer.concat([Buffer.from('54584E00', 'hex'), Buffer.from(t.tx_blob, 'hex')])).slice(0, 32)).toString('hex').toUpperCase();
 console.log('proving', hash, 'from ledger', fromLedger);
 const log = openSync(`${out}/chrome.log`, 'w');
-const chrome = spawn('google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${out}/profile`,
+const chrome = spawn(process.env.CHROME || 'google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${out}/profile`,
   '--window-size=1440,900', '--mute-audio', '--no-sandbox', '--disable-dev-shm-usage', '--no-zygote',
   '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', 'about:blank'], { stdio: ['ignore', log, log] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));

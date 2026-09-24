@@ -1,5 +1,5 @@
 // The page on a phone (emulated: mobile viewport, touch, DPR 3): the tour's
-// first stops, the plain page after the tour, a pinch, the legend.
+// stops, the plain page after the tour, a drag, a pinch, a double-tap, the legend.
 // Usage: node test/phone.mjs [outdir]   (SHOT_W/SHOT_H: the viewport)
 import { spawn } from 'node:child_process';
 import { writeFileSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
@@ -9,7 +9,7 @@ const W = +(process.env.SHOT_W || 390), H = +(process.env.SHOT_H || 844);
 mkdirSync(out, { recursive: true });
 rmSync(`${out}/profile/DevToolsActivePort`, { force: true });   // a stale one would name an old port
 const log = openSync(`${out}/chrome.log`, 'w');
-const chrome = spawn('google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${out}/profile`,
+const chrome = spawn(process.env.CHROME || 'google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${out}/profile`,
   `--window-size=${W},${H}`, '--hide-scrollbars', '--mute-audio', '--no-sandbox', '--disable-dev-shm-usage', '--no-zygote',
   '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', 'about:blank'], { stdio: ['ignore', log, log] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -47,32 +47,34 @@ await ev(`document.getElementById('tour-skip') && !document.getElementById('tour
 await sleep(8000);
 await shot('plain');
 console.log('fps-ish', await ev(`window.__proof.frames`), 'status:', await ev(`document.getElementById('status').textContent`));
+const view = () => ev(`JSON.stringify(window.__proof.view())`).then(JSON.parse);
 if (process.env.PINCH) {
-  // two fingers spreading apart over the temple
-  const cx = W / 2, cy = +process.env.PINCH;
-  const pts = d => [{ x: cx - d, y: cy, id: 1 }, { x: cx + d, y: cy, id: 2 }];
+  // one finger across the sky turns the view; two spreading apart bring it closer
+  const cy = +process.env.PINCH, v0 = await view();
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: W * 0.3, y: cy, id: 1 }] });
+  for (let x = W * 0.3; x <= W * 0.7; x += 12) { await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: cy, id: 1 }] }); await sleep(40); }
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  const v1 = await view();
+  const cx = W / 2, pts = d => [{ x: cx - d, y: cy, id: 1 }, { x: cx + d, y: cy, id: 2 }];
   await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(20) });
   for (let d = 24; d <= 110; d += 6) { await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(d) }); await sleep(60); }
   await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await sleep(6000);
   await shot('pinched');
-  console.log('zoom after pinch:', await ev(`document.body.classList.contains('zoomed')`));
+  const v2 = await view();
+  console.log('drag turns the view:', Math.abs(v1.yaw - v0.yaw) > 0.1, '| pinch comes closer:', v2.dist < v1.dist * 0.8);
 }
 if (process.env.DTAP) {
-  // a double-tap zooms in on the spot; another goes back to the whole sheet
-  // (pointer events made in the page: CDP's touch dispatch waits on each slow
-  // software-GL frame, which spreads two taps further apart than any real ones)
-  const t = async () => {
-    await ev(`(() => {
-      const gl = document.getElementById('gl'), o = { pointerId: 7, pointerType: 'touch', isPrimary: true, bubbles: true,
-        button: 0, buttons: 1, clientX: ${W / 2}, clientY: ${+process.env.DTAP} };
-      for (let k = 0; k < 2; k++) { gl.dispatchEvent(new PointerEvent('pointerdown', o)); gl.dispatchEvent(new PointerEvent('pointerup', { ...o, buttons: 0 })); }
-    })()`);
-    await sleep(4000);
-    return ev(`document.body.classList.contains('zoomed')`);
-  };
-  if (await ev(`document.body.classList.contains('zoomed')`)) { await ev(`document.getElementById('fit').click()`); await sleep(3000); }
-  console.log('double-tap zooms in:', await t(), '| again zooms out:', !(await t()));
+  // a double-tap: the whole view again (pointer events made in the page: CDP's
+  // touch dispatch waits on each slow software-GL frame, which spreads two taps
+  // further apart than any real ones)
+  await ev(`(() => {
+    const sky = document.getElementById('sky'), o = { pointerId: 7, pointerType: 'touch', isPrimary: true, bubbles: true,
+      button: 0, buttons: 1, clientX: ${W / 2}, clientY: ${+process.env.DTAP} };
+    for (let k = 0; k < 2; k++) { sky.dispatchEvent(new PointerEvent('pointerdown', o)); sky.dispatchEvent(new PointerEvent('pointerup', { ...o, buttons: 0 })); }
+  })()`);
+  await sleep(4000);
+  console.log('double-tap brings back the whole view:', !(await view()).moved);
 }
 if (process.env.AGAIN) {
   // the Tour button in the menu starts the tour over (a real tap, so the narrator may speak)

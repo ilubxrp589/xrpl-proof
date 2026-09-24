@@ -10,7 +10,9 @@
   window.draw = async (v, style) => {
     await document.fonts.load('600 40px "Bodoni Moda"'); await document.fonts.load('italic 600 40px "Bodoni Moda"');
     if (style === 'space') await spaceFonts();
-    return (style === 'space' ? drawSpaceReceipt(v) : drawReceipt(v)).toDataURL('image/png');
+    // kept here and read back in pieces: one message of several MB is more than some CDP clients take
+    window.out = (style === 'space' ? drawSpaceReceipt(v) : drawReceipt(v)).toDataURL('image/png');
+    return window.out.length;
   };
   window.ready = true;
 </script>

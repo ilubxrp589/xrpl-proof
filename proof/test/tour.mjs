@@ -1,5 +1,5 @@
 // Walk the tour in headless Chrome: a screenshot and the band's text at every
-// stop, and the genesis lookup inked on the account stop. Usage: node test/tour.mjs [outdir]   (SHOT_W/SHOT_H set the window;
+// stop, and the genesis lookup proven (lit) on the account stop. Usage: node test/tour.mjs [outdir]   (SHOT_W/SHOT_H set the window;
 // MOBILE=1 emulates a phone at that size)
 import { spawn } from 'node:child_process';
 import { writeFileSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
@@ -9,7 +9,7 @@ const W = +(process.env.SHOT_W || 1600), H = +(process.env.SHOT_H || 900), mobil
 mkdirSync(out, { recursive: true });
 rmSync(`${out}/profile/DevToolsActivePort`, { force: true });   // a stale one would name an old port
 const log = openSync(`${out}/chrome.log`, 'w');
-const chrome = spawn('google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${out}/profile`,
+const chrome = spawn(process.env.CHROME || 'google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${out}/profile`,
   `--window-size=${W},${H}`, '--hide-scrollbars', '--mute-audio', '--no-sandbox', '--disable-dev-shm-usage', '--no-zygote',
   '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--use-angle=swiftshader',
   ...(process.env.CHROME_FLAGS ? process.env.CHROME_FLAGS.split('|') : []), 'about:blank'], { stdio: ['ignore', log, log] });
@@ -44,13 +44,13 @@ for (let i = 0; i <= 7; i++) {
   await settle(i === 0 ? 10 : 7);
   if (i === 6) {
     await ev(`document.getElementById('tour-genesis').click()`);
-    for (let k = 0; k < 40 && !/In ink|Proven|Still in pencil/.test(await ev(`document.getElementById('tour-live').textContent`)); k++) await sleep(1000);
+    for (let k = 0; k < 40 && !/Lit:|Proven|Still an outline/.test(await ev(`document.getElementById('tour-live').textContent`)); k++) await sleep(1000);
   }
   console.log(`stop ${i}:`, (await band()).slice(0, 420));
-  console.log('        zoom', await ev(`JSON.stringify({ zoom: +document.body.classList.contains('zoomed'), mode: document.body.dataset.light, marks: [...document.querySelectorAll('.t-mark.on')].map(m => m.textContent + '@' + m.style.transform.replace(/translate|px|\\(|\\)/g, '')).join(' ') })`));
+  console.log('        view', await ev(`JSON.stringify({ dist: +window.__proof.view().dist.toFixed(2), names: document.getElementById('names').getAttribute('aria-pressed'), marks: [...document.querySelectorAll('.t-mark.on')].map(m => m.textContent + '@' + m.style.transform.replace(/translate|px|\\(|\\)/g, '')).join(' ') })`));
   await shot(`stop-${i}`);
 }
 await ev(`document.getElementById('tour-next').click()`);   // Done
 await sleep(1500);
-console.log('after:', await ev(`JSON.stringify({ touring: document.body.classList.contains('touring'), hidden: document.getElementById('tour').hidden, seen: localStorage.getItem('proof.toured'), light: document.body.dataset.light })`));
+console.log('after:', await ev(`JSON.stringify({ touring: document.body.classList.contains('touring'), hidden: document.getElementById('tour').hidden, seen: localStorage.getItem('proof.toured'), names: document.getElementById('names').getAttribute('aria-pressed') })`));
 ws.close(); chrome.kill('SIGKILL'); process.exit(0);

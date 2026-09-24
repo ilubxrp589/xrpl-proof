@@ -10,7 +10,7 @@ const url = process.env.URL || 'http://127.0.0.1:8791/?dtmax=3';
 mkdirSync(out, { recursive: true });
 rmSync(`${out}/profile/DevToolsActivePort`, { force: true });
 const log = openSync(`${out}/chrome.log`, 'w');
-const chrome = spawn('google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${out}/profile`,
+const chrome = spawn(process.env.CHROME || 'google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${out}/profile`,
   '--window-size=1600,900', '--mute-audio', '--no-sandbox', '--disable-dev-shm-usage', '--no-zygote',
   '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', 'about:blank'], { stdio: ['ignore', log, log] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
