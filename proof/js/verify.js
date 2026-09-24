@@ -562,6 +562,7 @@ export function verifyReceipt(r, rootKey) {
   try { tx = txLeaf(t.leaf, r.tx.hash); } catch (e) { return fail(e.message); }
   return {
     ok: true, tx, hash: r.tx.hash.toUpperCase(), steps,
+    record: r.chain ? (r.chain.key === skipKey() ? 'last256' : 'flags') : null,
     ledger: { seq: ledger.seq, hash: ledger.hash, close: ledger.close + RIPPLE_EPOCH },
     anchor: { seq: anchor.seq, hash: anchor.hash, close: anchor.close + RIPPLE_EPOCH, signers: signers.size,
               listed: list.validators.length, quorum: list.quorum, signed: [...signers].sort((a, b) => a - b) },

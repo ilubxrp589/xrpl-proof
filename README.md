@@ -25,7 +25,9 @@ All of it runs in a Web Worker, using [@noble/curves](https://github.com/paulmil
 
 Paste a transaction hash into the lookup box (or open `…/proof/?tx=<hash>`) and the page proves it: from the ledger it has just checked, through that ledger's own record of earlier ledgers and, for older ones, a chain of parent hashes, down to the transaction and its result in its ledger's transaction tree. Nothing on the way is trusted; a wrong byte anywhere breaks the chain. It works back to the start of the ledger's history in 2013, using a public full-history server for anything older than the local node keeps.
 
-**Download the receipt (PDF)** gives you an engraved receipt with the evidence attached inside the PDF. Drop it back on the page, now or years from now, and every check runs again, with nothing else needed. Memos on the transaction are shown, and proven, as part of it.
+**Download the receipt (PDF)** gives you a receipt with the evidence attached inside the PDF. Drop it back on the page, now or years from now, and every check runs again, with nothing else needed. Memos on the transaction are shown, and proven, as part of it.
+
+A receipt comes in two looks. **Engraved** matches the certificate. **Deep field** is drawn in the terms of Deep Field, this site's live view of consensus. It shows the validators' gate, one flare for each listed validator, lit if it signed. The event horizon inside the gate is open, since it opens only at a quorum. The transaction is a body deep in the horizon's well, in its type's color, smaller the further back its ledger is, and unlit if it failed. Below that is the proof's chain, back from the ledger signed now. Every mark on it is a proven fact, shown once. Its words are real text laid invisibly under the picture, so they can be selected, copied and searched. `?style=space` opens the page with that look chosen.
 
 ## What it trusts
 
@@ -36,7 +38,7 @@ One key: the list publisher's, which you pick on the page. The relay and the pee
 - `proof/` is the page: static files, no build step. A WebGL 2 renderer engraves the certificate, a temple whose 35 columns ink as their validators' signatures check out. It has a guided tour with narration, and layouts for phones held either way.
 - `feed/proof_feed.py` is the relay. It subscribes to a local xrpld's ledger and validation streams and forwards the raw bytes over WebSocket. It also serves the two signed lists, the validators' manifests, the relay's own reading of an account (the pencil), and state-tree paths from the peer service.
 - `feed/proof_peer.mjs` joins the local xrpld as a peer, over the XRPL peer protocol, and asks for the state-tree nodes along an account's path: the same request nodes use to sync. Lookups for one ledger go out as one request and are cached.
-- `proof/js/receipt.js`, `pdf.js` and `receipt-art.js` gather a receipt's evidence, write the PDF (by hand, no library) with the evidence attached, and draw the receipt. `verifyReceipt` in `verify.js` is the one check that both makes and later accepts a receipt.
+- `proof/js/receipt.js` and `pdf.js` gather a receipt's evidence and write the PDF (by hand, no library) with the evidence attached; `receipt-art.js` draws the engraved receipt and `receipt-space.js` the Deep Field one. `verifyReceipt` in `verify.js` is the one check that both makes and later accepts a receipt.
 - `narration/` holds the tour's narration scripts and the script that renders them with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M). The rendered clips are in `proof/audio/`.
 
 ## Running it
@@ -49,11 +51,12 @@ You need an xrpld (rippled) node with admin JSON-RPC on `127.0.0.1:5005` and Web
 
 ## Tests
 
-In `proof/test/`, `live.mjs` and `balance.mjs` check the verifier against mainnet through your node, including forged signatures, a tampered list and tampered proof nodes, all of which must be refused. `receipt.mjs` proves transactions near and far (back to 2021 through full history) and refuses five forged receipts. The others drive the page in headless Chrome: `receipt-ui.mjs` (prove, download, re-check, a tampered PDF), `tour.mjs`, `phone.mjs`, `voice.mjs`, `flash.mjs`, `account.mjs`, `pencil.mjs`, `flat.mjs` and `shot.mjs`.
+In `proof/test/`, `live.mjs` and `balance.mjs` check the verifier against mainnet through your node, including forged signatures, a tampered list and tampered proof nodes, all of which must be refused. `receipt.mjs` proves transactions near and far (back to 2020 through full history) and refuses five forged receipts. `art.mjs` proves six real transactions (in the ledger signed now, recent, from 2020, a failed one, an issued currency and one with memos) and draws both receipt looks for each, through `art.html`. The others drive the page in headless Chrome: `receipt-ui.mjs` (prove, download, re-check, a tampered PDF), `tour.mjs`, `phone.mjs`, `voice.mjs`, `flash.mjs`, `account.mjs`, `pencil.mjs`, `flat.mjs` and `shot.mjs`.
 
 ## Credits
 
 - Bodoni Moda, by the Bodoni Moda Project Authors: SIL Open Font License 1.1, in `proof/assets/fonts/OFL.txt`.
+- Newsreader, by the Newsreader Project Authors, and Geist Mono, by the Geist Project Authors: SIL Open Font License 1.1, in `proof/assets/fonts/OFL-newsreader.txt` and `OFL-geistmono.txt`.
 - @noble/curves and @noble/hashes, by Paul Miller: MIT, in `proof/vendor/noble/*/LICENSE`.
 - The narration voices af_heart and am_fenrir, from Kokoro-82M by hexgrad: Apache-2.0.
 

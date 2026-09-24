@@ -13,6 +13,7 @@ import { Tour } from './tour.js';
 import { buildReceipt } from './receipt.js';
 import { receiptPdf, readEvidence } from './pdf.js';
 import { drawReceipt, amountText, headline, utc, RW, RH } from './receipt-art.js';
+import { drawSpaceReceipt, spaceFonts } from './receipt-space.js';
 
 const $ = s => document.querySelector(s);
 const RELAY = (() => {
@@ -780,6 +781,18 @@ $('#addr-form').addEventListener('submit', async e => {
 // wrapped in a PDF with the evidence attached.
 let wantTx = /^[0-9A-Fa-f]{64}$/.test(new URLSearchParams(location.search).get('tx') || '') ? new URLSearchParams(location.search).get('tx').toUpperCase() : null;
 let receiptJobs = 0, current = null;
+// the receipt's look: engraved (this page's) or Deep Field's; ?style=space picks the latter
+let receiptStyle = new URLSearchParams(location.search).get('style') === 'space' ? 'space' : (() => {
+  try { return localStorage.getItem('proof.receiptStyle') === 'space' ? 'space' : 'engraved'; } catch (e) { return 'engraved'; }
+})();
+function styleButtons() {
+  document.querySelectorAll('[data-style]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.style === receiptStyle)));
+}
+document.querySelectorAll('[data-style]').forEach(b => b.addEventListener('click', () => {
+  receiptStyle = b.dataset.style; styleButtons();
+  try { localStorage.setItem('proof.receiptStyle', receiptStyle); } catch (e) { /* storage blocked */ }
+}));
+styleButtons();
 const receiptWait = new Map();
 const checkReceipt = bundle => new Promise(done => { const id = ++receiptJobs; receiptWait.set(id, done); worker.postMessage({ t: 'receipt', id, bundle }); });
 const pause = ms => new Promise(r => setTimeout(r, ms));
@@ -879,16 +892,19 @@ $('#rc-close').addEventListener('click', () => { $('#receipt').hidden = true; cu
 $('#rc-pdf').addEventListener('click', async () => {
   if (!current) return;
   const { v, bundle } = current;
-  receiptStep('Engraving the receipt…');
+  const space = receiptStyle === 'space';
+  receiptStep(space ? 'Drawing the receipt…' : 'Engraving the receipt…');
   await pause(30);
-  const c = drawReceipt(v);
+  if (space) await spaceFonts();
+  const c = space ? drawSpaceReceipt(v) : drawReceipt(v);
   const jpeg = new Uint8Array(await (await new Promise(r => c.toBlob(r, 'image/jpeg', 0.84))).arrayBuffer());
+  // the engraved receipt carries its words as a footnote; the Deep Field one lays them under its picture
   const pdf = receiptPdf({ jpeg, width: RW, height: RH, title: `XRPL transaction receipt ${v.hash.slice(0, 16)}`,
     evidence: new TextEncoder().encode(JSON.stringify(bundle)),
-    lines: [`XRPL transaction ${v.hash}, ledger ${v.ledger.seq} (${v.ledger.hash})`,
-            'To check this receipt, drop this file on https://v2v.halcyon-names.io/proof/ . Its evidence is attached (proof-receipt.json).'] });
+    ...(space ? { layer: c.layer } : { lines: [`XRPL transaction ${v.hash}, ledger ${v.ledger.seq} (${v.ledger.hash})`,
+            'To check this receipt, drop this file on https://v2v.halcyon-names.io/proof/ . Its evidence is attached (proof-receipt.json).'] }) });
   const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: `xrpl-receipt-${v.hash.slice(0, 12).toLowerCase()}.pdf` });
+  const a = Object.assign(document.createElement('a'), { href: url, download: `xrpl-receipt-${v.hash.slice(0, 12).toLowerCase()}${space ? '-deep-field' : ''}.pdf` });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
   perf.lastPdf = pdf;                                    // test hook

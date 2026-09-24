@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Receipt art</title>
+<link rel="stylesheet" href="../assets/fonts/fonts.css">
+<body>
+<script type="module">
+  // Draws receipts from verified results (window.draw(v, style) → PNG data URL), for looking at the art alone
+  import { drawReceipt } from '../js/receipt-art.js';
+  import { drawSpaceReceipt, spaceFonts } from '../js/receipt-space.js';
+  window.draw = async (v, style) => {
+    await document.fonts.load('600 40px "Bodoni Moda"'); await document.fonts.load('italic 600 40px "Bodoni Moda"');
+    if (style === 'space') await spaceFonts();
+    return (style === 'space' ? drawSpaceReceipt(v) : drawReceipt(v)).toDataURL('image/png');
+  };
+  window.ready = true;
+</script>

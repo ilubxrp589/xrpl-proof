@@ -1,16 +1,23 @@
 /* Receipt PDFs, written by hand and read back. One A4 page: a picture of the
- * receipt, a few lines of real text (so the hashes can be copied), and the
+ * receipt, its words as real text (so the hashes can be copied), and the
  * receipt's evidence attached as a file (/EmbeddedFiles, /AF), which viewers
  * list as an attachment and the Proof page reads to check it. */
 const A4 = [595.276, 841.89];
 const latin = s => Uint8Array.from(s, ch => ch.charCodeAt(0) & 255);
 const esc = s => s.replace(/[\\()]/g, m => '\\' + m).replace(/[^\x20-\x7E]/g, '?');
+// typography the standard fonts can't encode, as plain ASCII
+const plain = s => s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014]/g, '-')
+  .replace(/\u2026/g, '...').replace(/\u00B7/g, '-').replace(/[\u2009\u00A0]/g, ' ');
 const pdfDate = d => `D:${d.toISOString().replace(/[-:T]/g, '').slice(0, 14)}Z`;
 export const EVIDENCE_NAME = 'proof-receipt.json';
 
-/** jpeg: the picture's bytes (width × height px, A4 proportions); lines: text
- *  set small along the foot of the page; evidence: the receipt, as bytes. */
-export function receiptPdf({ jpeg, width, height, lines, evidence, title }) {
+/** jpeg: the picture's bytes (width × height px, A4 proportions); evidence:
+ *  the receipt, as bytes. The words go in one of two ways: lines, text set
+ *  small along the foot of the page, or layer, the words the picture draws
+ *  ({s, x, y, w, size} in its pixels, y the baseline), laid invisibly under
+ *  each one in Courier stretched to its width, so selecting or searching the
+ *  picture finds them and nothing is printed twice. */
+export function receiptPdf({ jpeg, width, height, lines = [], layer = [], evidence, title }) {
   const parts = [], at = [];
   let size = 0;
   const put = x => { const b = typeof x === 'string' ? latin(x) : x; parts.push(b); size += b.length; };
@@ -20,14 +27,18 @@ export function receiptPdf({ jpeg, width, height, lines, evidence, title }) {
     if (stream) { put('stream\n'); put(stream); put('\nendstream\n'); }
     put('endobj\n');
   };
-  const [pw, ph] = A4, now = pdfDate(new Date());
+  const [pw, ph] = A4, now = pdfDate(new Date()), k = pw / width, f = x => +x.toFixed(2);
   const content = latin(`q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q\n` +
-    `BT /F1 6.2 Tf 0.13 0.106 0.19 rg 7.4 TL 1 0 0 1 34 ${8 + 7.4 * (lines.length - 1)} Tm\n` +
-    lines.map((l, i) => `${i ? 'T* ' : ''}(${esc(l)}) Tj`).join('\n') + '\nET\n');
+    (lines.length ? `BT /F1 6.2 Tf 0.13 0.106 0.19 rg 7.4 TL 1 0 0 1 34 ${8 + 7.4 * (lines.length - 1)} Tm\n` +
+      lines.map((l, i) => `${i ? 'T* ' : ''}(${esc(l)}) Tj`).join('\n') + '\nET\n' : '') +
+    (layer.length ? 'BT 3 Tr\n' + layer.map(t => {
+      const s = plain(t.s), size = t.size * k;             // Courier's glyphs are all 0.6 em wide
+      return `/F2 ${f(size)} Tf ${f(100 * t.w * k / (0.6 * size * Math.max(1, s.length)))} Tz 1 0 0 1 ${f(t.x * k)} ${f(ph - t.y * k)} Tm (${esc(s)}) Tj`;
+    }).join('\n') + '\nET\n' : ''));
   put('%PDF-1.7\n%\xE2\xE3\xCF\xD3\n');
   obj(1, `<< /Type /Catalog /Pages 2 0 R /Lang (en-US) /AF [7 0 R] /Names << /EmbeddedFiles << /Names [(${EVIDENCE_NAME}) 7 0 R] >> >> >>`);
   obj(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
-  obj(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 4 0 R >> /Font << /F1 5 0 R >> >> /Contents 6 0 R >>`);
+  obj(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 4 0 R >> /Font << /F1 5 0 R /F2 10 0 R >> >> /Contents 6 0 R >>`);
   obj(4, `<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>`, jpeg);
   obj(5, '<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>');
   obj(6, `<< /Length ${content.length} >>`, content);
@@ -35,9 +46,10 @@ export function receiptPdf({ jpeg, width, height, lines, evidence, title }) {
          '/Desc (The evidence for this receipt. To check it, drop this PDF on the Proof page.) /EF << /F 8 0 R /UF 8 0 R >> >>');
   obj(8, `<< /Type /EmbeddedFile /Subtype /application#2Fjson /Params << /Size ${evidence.length} /ModDate (${now}) >> /Length ${evidence.length} >>`, evidence);
   obj(9, `<< /Title (${esc(title)}) /Producer (Proof) /Creator (https://v2v.halcyon-names.io/proof/) /CreationDate (${now}) >>`);
+  obj(10, '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>');
   const xref = size, id = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
-  put(`xref\n0 10\n0000000000 65535 f \n${at.slice(1).map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`);
-  put(`trailer\n<< /Size 10 /Root 1 0 R /Info 9 0 R /ID [<${id}> <${id}>] >>\nstartxref\n${xref}\n%%EOF\n`);
+  put(`xref\n0 11\n0000000000 65535 f \n${at.slice(1).map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`);
+  put(`trailer\n<< /Size 11 /Root 1 0 R /Info 9 0 R /ID [<${id}> <${id}>] >>\nstartxref\n${xref}\n%%EOF\n`);
   const out = new Uint8Array(size);
   let o = 0;
   for (const p of parts) { out.set(p, o); o += p.length; }
@@ -51,7 +63,7 @@ export function readEvidence(bytes) {
   if (head.startsWith('{')) return JSON.parse(td.decode(bytes));
   if (!head.startsWith('%PDF')) throw new Error('that is not a receipt: neither a PDF nor its evidence file');
   const s = new TextDecoder('latin1').decode(bytes);          // one character per byte, so offsets line up
-  const i = s.indexOf('/Type /EmbeddedFile');
+  const i = s.lastIndexOf('/Type /EmbeddedFile');                 // the last: text on the page may quote it
   if (i < 0) throw new Error('this PDF carries no evidence, so it was not made by the Proof page');
   const len = /\/Length (\d+)/.exec(s.slice(i, i + 600));
   const st = s.indexOf('stream', i), start = st + (s[st + 6] === '\r' ? 8 : 7);

@@ -333,7 +333,14 @@
   #rc-rows dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
   #rc-proof { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(34, 27, 48, 0.2); font-size: 14px; line-height: 1.55; }
   #rc-proof:empty { display: none; }
-  #rc-pdf { margin: 16px 0 0 -8px; font-size: 17px; font-style: italic; font-weight: 600; }
+  .rc-style { margin: 16px 0 0; font-size: 13.5px; color: var(--ink-soft); display: flex; align-items: baseline; gap: 2px; }
+  .rc-style span { font-style: italic; margin-right: 6px; }
+  .rc-style button { font-size: 14px; color: var(--ink-soft); padding: 4px 8px 6px; }
+  .rc-style button[aria-pressed="true"] { color: var(--ink); font-style: italic; }
+  .rc-style button[aria-pressed="true"]::after { transform: scaleX(1); height: 1.5px; }
+  #receipt:not([data-state="proven"]) .rc-style { display: none; }
+  @media (pointer: coarse) { .rc-style button { padding: 10px 10px 12px; } }   /* a finger's width */
+  #rc-pdf { margin: 4px 0 0 -8px; font-size: 17px; font-style: italic; font-weight: 600; }
   #rc-pdf::after { transform: scaleX(1); height: 1.5px; }
   #rc-pdf[hidden] { display: none; }
   #rc-steps { margin-top: 10px; font-style: italic; font-size: 14px; color: var(--ink-soft); }
@@ -440,6 +447,9 @@
   <p id="rc-outcome"></p>
   <dl id="rc-rows"></dl>
   <p id="rc-proof"></p>
+  <p class="rc-style" id="rc-style" role="group" aria-label="The receipt's look"><span>Look</span>
+    <button type="button" data-style="engraved" aria-pressed="true">Engraved</button>
+    <button type="button" data-style="space" aria-pressed="false">Deep field</button></p>
   <button type="button" id="rc-pdf" hidden>Download the receipt (PDF)</button>
   <p id="rc-steps" aria-live="polite"></p>
 </section>
