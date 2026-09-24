@@ -8,6 +8,12 @@ Every few seconds the XRP Ledger's validators agree on a new ledger and sign it.
 
 Ink means checked here. Pencil means someone else said so.
 
+## Night and day
+
+The page opens at night, and the certificate is a star atlas plate: silver ink on dark stock flecked with metal. The temple is an observatory, its dome open and its telescope trained on a star. Around it the sky is engraved: stars in three sizes, the Milky Way in stipple, the Plough and Cassiopeia. The moon's phases sit in the corners, and a star chart's declination circles and hour lines are printed underneath. When the ledger's header checks out, the star the telescope watches sends out its rays. `?theme=day` opens the original look instead: cream paper, a temple, green leather.
+
+At night the sheet lies on a desk that is meant to look real. The wood and the leather are photographed textures, and a brass astrolabe and a spyglass lie beside the sheet, all lit by the lamp that follows your pointer and shadowed by it. The astrolabe was modelled in Blender (`desk/astrolabe.py`). Its detailed model is rendered from above as maps of colour, normal and roughness, and a light version of the same parts is drawn in 3D wearing them, so its rims and walls are solid. The spyglass is turned on a lathe in `proof/js/props.js`. Phones, which don't show the desk beside the sheet, load neither.
+
 ## What your browser checks
 
 | Step | Check |
@@ -39,7 +45,8 @@ One key: the list publisher's, which you pick on the page. The relay and the pee
 - `feed/proof_feed.py` is the relay. It subscribes to a local xrpld's ledger and validation streams and forwards the raw bytes over WebSocket. It also serves the two signed lists, the validators' manifests, the relay's own reading of an account (the pencil), and state-tree paths from the peer service.
 - `feed/proof_peer.mjs` joins the local xrpld as a peer, over the XRPL peer protocol, and asks for the state-tree nodes along an account's path: the same request nodes use to sync. Lookups for one ledger go out as one request and are cached.
 - `proof/js/receipt.js` and `pdf.js` gather a receipt's evidence and write the PDF (by hand, no library) with the evidence attached; `receipt-art.js` draws the engraved receipt and `receipt-space.js` the Deep Field one. `verifyReceipt` in `verify.js` is the one check that both makes and later accepts a receipt.
-- `narration/` holds the tour's narration scripts and the script that renders them with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M). The rendered clips are in `proof/audio/`.
+- `narration/` holds the tour's narration scripts and the script that renders them with [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M). `scripts-night.json` has the night look's words for the stops that change. The rendered clips are in `proof/audio/`.
+- `desk/` holds the night desk's sources: `astrolabe.py` builds and renders the astrolabe in Blender, and `pack.py` packs its maps, and the photographed wood and leather, into `proof/assets/desk/`.
 
 ## Running it
 
@@ -59,6 +66,7 @@ In `proof/test/`, `live.mjs` and `balance.mjs` check the verifier against mainne
 - Newsreader, by the Newsreader Project Authors, and Geist Mono, by the Geist Project Authors: SIL Open Font License 1.1, in `proof/assets/fonts/OFL-newsreader.txt` and `OFL-geistmono.txt`.
 - @noble/curves and @noble/hashes, by Paul Miller: MIT, in `proof/vendor/noble/*/LICENSE`.
 - The narration voices af_heart and am_fenrir, from Kokoro-82M by hexgrad: Apache-2.0.
+- Wood Table 001, photographed by Dimitrios Savva and processed by Rico Cilliers, and Leather Red 03, by Rob Tuytel, both from [Poly Haven](https://polyhaven.com): CC0, repacked in `proof/assets/desk/`.
 
 ## License
 

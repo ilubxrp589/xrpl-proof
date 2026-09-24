@@ -11,7 +11,7 @@ rmSync(`${out}/profile/DevToolsActivePort`, { force: true });   // a stale one w
 const log = openSync(`${out}/chrome.log`, 'w');
 const chrome = spawn(process.env.CHROME || 'google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${out}/profile`,
   `--window-size=${W},${H}`, '--hide-scrollbars', '--mute-audio', '--no-sandbox', '--disable-dev-shm-usage', '--no-zygote',
-  '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', 'about:blank'], { stdio: ['ignore', log, log] });
+  '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', `--use-angle=${process.env.SHOT_GL || 'swiftshader'}`, 'about:blank'], { stdio: ['ignore', log, log] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let list, port;
 for (let i = 0; i < 60 && !list; i++) {

@@ -22,6 +22,8 @@ const RELAY = (() => {
   if (location.protocol === 'file:' || ['127.0.0.1', 'localhost'].includes(location.hostname)) return 'http://127.0.0.1:3783';
   return location.origin + '/proof-feed';
 })();
+// the star atlas plate by night; ?theme=day for the cream certificate it grew from
+const NIGHT = new URLSearchParams(location.search).get('theme') !== 'day';
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const coarse = matchMedia('(pointer: coarse)').matches;      // fingers, not a mouse
 const fmt = n => Number(n).toLocaleString('en-US');
@@ -113,7 +115,7 @@ async function boot() {
     await document.fonts.load(`italic 500 40px 'Bodoni Moda'`);
   } catch (e) { /* fall back to the system serif */ }
   try {
-    renderer = new Renderer($('#gl'));
+    renderer = new Renderer($('#gl'), { night: NIGHT });
   } catch (e) {
     return fail(String(e.message || e));
   }
@@ -137,7 +139,7 @@ async function loadList() {
 
 function start() {
   const root = TRUST_ROOTS[list.root];
-  const sheet = buildStatic({ trustRoot: root.key, trustName: root.name, validators: list.validators, quorum: list.quorum });
+  const sheet = buildStatic({ trustRoot: root.key, trustName: root.name, validators: list.validators, quorum: list.quorum, night: NIGHT });
   dyn = dyn_ = new Dynamic(list.validators, list.quorum);
   renderer.setSheet(sheet, dyn);
   target.ink[PART.STEPS] = 1;                    // the list is verified: the steps are cut
@@ -152,7 +154,9 @@ function start() {
   connect();
   if (!tour) {
     tour = new Tour(tourApi);
-    if (!Tour.seen() || new URLSearchParams(location.search).has('tour')) tour.start();
+    // it opens by itself on a first visit; ?tour forces it, ?notour (for links and tests) skips it
+    const q = new URLSearchParams(location.search);
+    if ((!Tour.seen() && !q.has('notour')) || q.has('tour')) tour.start();
   }
   if (!started) { started = true; requestAnimationFrame(tick); }
 }
@@ -498,7 +502,7 @@ const tourApi = {
       header: show && show.headerAt !== null && L && L.hdr ? L.hdr.hash : null,
       root: root.name, rootKey: root.key, other: other.name,
       acct,
-      touch: coarse, stacked: !!(renderer && renderer.stacked),
+      touch: coarse, stacked: !!(renderer && renderer.stacked), night: NIGHT,
     };
   },
   name: i => (list && list.validators[i] ? list.validators[i].domain || list.validators[i].master.slice(0, 10) + '…' : ''),
@@ -600,7 +604,7 @@ $('#gl').addEventListener('pointermove', () => { if (view.drag && view.drag.move
  *  URL, so alignment can be checked without perspective or lighting. */
 perf.flat = (side = 'front') => {
   const root = TRUST_ROOTS[list.root];
-  const sh = buildStatic({ trustRoot: root.key, trustName: root.name, validators: list.validators, quorum: list.quorum });
+  const sh = buildStatic({ trustRoot: root.key, trustName: root.name, validators: list.validators, quorum: list.quorum, night: NIGHT });
   const plate = side === 'front' ? sh.plate : sh.back;
   const c = document.createElement('canvas'); c.width = SW; c.height = SH;
   const g = c.getContext('2d');

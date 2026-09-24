@@ -1,4 +1,6 @@
 /* The temple on the note: a round, open colonnade of 35 columns under a dome.
+ * At night (the star atlas plate) the same colonnade is an observatory: its
+ * dome is split by a shutter slit, and the lantern gives way to a telescope. 
  *
  * It is the chain of trust drawn as architecture, bottom to top:
  *   cornerstone   the one pinned key                     part CORNER
@@ -18,6 +20,10 @@
  * the way a burin does, instead of lying flat across the screen.
  */
 export const N_COLS = 35;
+/** The observatory's telescope: its azimuth (the lathe's angle, π/2 faces the
+ *  viewer), its elevation, and so where in the sky the ledger's star is. */
+export const SCOPE = { az: Math.PI / 2 + 0.62, el: 0.78 };
+export const scopeDir = () => [Math.cos(SCOPE.az) * Math.cos(SCOPE.el), Math.sin(SCOPE.el), Math.sin(SCOPE.az) * Math.cos(SCOPE.el)];
 export const PART = { BEAM: 35, DOME: 36, STEPS: 37, CORNER: 38, LANTERN: 39, GROUND: 40 };
 
 const TAU = Math.PI * 2;
@@ -86,6 +92,62 @@ class Builder {
       for (let i = 0; i < seg; i++)
         this.quad(base + j * W + i, base + (j + 1) * W + i, base + (j + 1) * W + i + 1, base + j * W + i + 1);
   }
+  /** Like lathe(), but each row has its own angular range, from span(j, y):
+   *  [a0, a1], or null for a row that is not there (quads touching it are
+   *  dropped). The dome's slit is cut this way, at a constant width. */
+  latheSpan(profile, seg, part, span, rOff = 0) {
+    const rows = [];
+    let arc = 0;
+    for (let j = 0; j < profile.length; j++) {
+      if (j) arc += Math.hypot(profile[j][0] - profile[j - 1][0], profile[j][1] - profile[j - 1][1]);
+      const sp = span(j, profile[j][0], profile[j][1]);
+      if (!sp) { rows.push(null); continue; }
+      const [a0, a1] = sp, r = profile[j][0] + rOff, row = [];
+      for (let i = 0; i <= seg; i++) {
+        const a = a0 + (a1 - a0) * (i / seg);
+        row.push({ x: Math.cos(a) * r, y: profile[j][1], z: Math.sin(a) * r, u: ((a + Math.PI / 2) / TAU % 1 + 1) % 1, v: arc });
+      }
+      rows.push(row);
+    }
+    const base = this.n, idx = [];
+    for (let j = 0; j < rows.length; j++) {
+      if (!rows[j]) { idx.push(-1); continue; }
+      idx.push(this.n);
+      for (let i = 0; i <= seg; i++) {
+        const p = rows[j][i], up = rows[j + 1] || rows[j], dn = rows[j - 1] || rows[j];
+        const ty = [up[i].x - dn[i].x, up[i].y - dn[i].y, up[i].z - dn[i].z];
+        const ip = rows[j][Math.min(i + 1, seg)], im = rows[j][Math.max(i - 1, 0)];
+        const tx = [ip.x - im.x, ip.y - im.y, ip.z - im.z];
+        const nm = [ty[1] * tx[2] - ty[2] * tx[1], ty[2] * tx[0] - ty[0] * tx[2], ty[0] * tx[1] - ty[1] * tx[0]];
+        // outward: the same side as the point itself, seen from the axis
+        const out = nm[0] * p.x + nm[2] * p.z + nm[1] * 0.01 >= 0 ? 1 : -1;
+        this.vert([p.x, p.y, p.z], nm.map(c => c * out), part, p.u, p.v);
+      }
+    }
+    for (let j = 0; j + 1 < rows.length; j++) {
+      if (idx[j] < 0 || idx[j + 1] < 0) continue;
+      for (let i = 0; i < seg; i++) this.quad(idx[j] + i, idx[j + 1] + i, idx[j + 1] + i + 1, idx[j] + i + 1);
+    }
+    return base;
+  }
+  /** A lathe turned about the local y axis, then set down along `axis` with its
+   *  base at `at`. v runs along the axis, so rings follow the form. */
+  latheOn(profile, seg, part, axis, at) {
+    const tmp = new Builder();
+    tmp.lathe(profile, seg, part);
+    // a rotation taking +y to axis
+    const y = axis, ref = Math.abs(y[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    const cr = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const nz = v => { const l = Math.hypot(...v); return v.map(c => c / l); };
+    const x = nz(cr(y, ref)), z = cr(x, y);
+    const R = v => [x[0] * v[0] + y[0] * v[1] + z[0] * v[2], x[1] * v[0] + y[1] * v[1] + z[1] * v[2], x[2] * v[0] + y[2] * v[1] + z[2] * v[2]];
+    const base = this.n;
+    for (let k = 0; k < tmp.pos.length / 3; k++) {
+      const p = R([tmp.pos[k * 3], tmp.pos[k * 3 + 1], tmp.pos[k * 3 + 2]]), nm = R([tmp.nrm[k * 3], tmp.nrm[k * 3 + 1], tmp.nrm[k * 3 + 2]]);
+      this.vert([p[0] + at[0], p[1] + at[1], p[2] + at[2]], nm, part, tmp.att[k * 4 + 1], tmp.pos[k * 3 + 1]);
+    }
+    for (const i of tmp.idx) this.idx.push(i + base);
+  }
   /** An axis-aligned box rotated by `yaw` about its centre's vertical. */
   box(c, size, yaw, part) {
     const [sx, sy, sz] = size.map(s => s / 2), cs = Math.cos(yaw), sn = Math.sin(yaw);
@@ -108,6 +170,49 @@ class Builder {
       this.quad(b, b + 1, b + 2, b + 3);
     }
   }
+}
+
+/** The observatory's dome: a hemisphere split by a shutter slit of constant
+ *  width facing the viewer's left, rails either side of it, 35 ribs (one
+ *  above each column, as the ledger rests on its validators), and the
+ *  telescope looking out through the slit. */
+function observatory(B, yS, rDome, rOut) {
+  const aS = SCOPE.az, hw = 1.45;                       // the slit: its azimuth and half-width
+  const prof = [];
+  for (let k = 0; k <= 40; k++) {
+    const t = (k / 40) * (Math.PI / 2) * 0.985;
+    prof.push([Math.cos(t) * rDome + 0.001, yS + Math.sin(t) * rDome * 0.94]);
+  }
+  const gap = r => Math.asin(Math.min(1, hw / Math.max(r, 1e-3)));   // half the slit's angle at this radius
+  B.latheSpan(prof, 220, PART.DOME, (j, r) => [aS + gap(r), aS - gap(r) + TAU]);
+  // shutter rails, standing proud either side of the slit
+  const rail = 0.34;
+  B.latheSpan(prof, 2, PART.DOME, (j, r) => (gap(r) >= Math.PI / 2 - 1e-3 ? null : [aS + gap(r), aS + gap(r) + rail / r]), 0.16);
+  B.latheSpan(prof, 2, PART.DOME, (j, r) => (gap(r) >= Math.PI / 2 - 1e-3 ? null : [aS - gap(r) - rail / r, aS - gap(r)]), 0.16);
+  // ribs, cut where they would cross the open slit
+  for (let i = 0; i < N_COLS; i++) {
+    const a = (i / N_COLS) * TAU + Math.PI / 2, w = 0.05;
+    const off = ((a - aS) % TAU + TAU + Math.PI) % TAU - Math.PI;
+    B.latheSpan(prof, 2, PART.DOME, (j, r) => (Math.abs(off) < gap(r) + w ? null : [a - w, a + w]), 0.09);
+  }
+  // a band at the springing, where the dome turns on its track
+  B.lathe(hard([[rDome + 0.35, yS - 0.02], [rDome + 0.35, yS + 0.42], [rDome - 0.1, yS + 0.46]]), 200, PART.DOME);
+  // the telescope: a long tube with a dew shield, on its pier inside
+  const d = scopeDir(), at = [0, yS + 0.8, 0];
+  B.latheOn([[0.001, -3.2], [0.72, -3.2], [0.72, -2.9], [0.66, -2.8], [0.66, 9.6], [0.74, 9.7], [0.74, 10.6],
+             [0.92, 10.7], [0.92, 14.2], [0.8, 14.3], [0.8, 14.35]], 48, PART.LANTERN, d, at);
+  // the finder, a small tube strapped along the main one
+  const side = [d[2], 0, -d[0]], sl = Math.hypot(...side) || 1;
+  B.latheOn([[0.001, 6.0], [0.22, 6.0], [0.22, 10.2], [0.27, 10.3], [0.27, 11.2], [0.001, 11.2]], 18, PART.LANTERN, d,
+            [at[0] + side[0] / sl * 1.1, at[1] + 0.9, at[2] + side[2] / sl * 1.1]);
+  // the ground the observatory stands on
+  B.lathe([[70, -0.02], [0.001, -0.02]], 160, PART.GROUND);
+  const top = yS + rDome * 0.94;
+  return {
+    pos: new Float32Array(B.pos), nrm: new Float32Array(B.nrm),
+    att: new Float32Array(B.att), idx: new Uint32Array(B.idx),
+    bounds: { r: rOut + (N_STEPS - 1) * STEP_RUN, h: top + 4, yDome: yS, yCap: Y_CAP, scopeAt: at },
+  };
 }
 
 /** Doric column at angle `a` on the ring: base, fluted shaft with entasis,
@@ -138,7 +243,7 @@ function column(B, i) {
   B.box([cx, Y_CAP - 0.1, cz], [D * 1.38, 0.2, D * 1.38], a - Math.PI / 2, i);
 }
 
-export function buildTholos() {
+export function buildTholos({ night = false } = {}) {
   const B = new Builder();
   // stylobate: three steps, hard-edged
   const rOut = R_COL + 1.25;
@@ -169,6 +274,7 @@ export function buildTholos() {
   const yA = y + 1.84, rD = rin + 0.2;
   B.lathe([[rD, yA], [rD, yA + 1.1], [rD + 0.12, yA + 1.16], [rD + 0.12, yA + 1.24], [rD - 0.1, yA + 1.3]], 180, PART.BEAM);
   const yS = yA + 1.3, rDome = rD - 0.1;
+  if (night) return observatory(B, yS, rDome, rOut);
   const dprof = [];
   for (let k = 0; k <= 28; k++) {
     const t = (k / 28) * (Math.PI / 2) * 0.93;

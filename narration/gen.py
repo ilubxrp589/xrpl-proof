@@ -1,5 +1,6 @@
 # Render the Proof page's tour narration with Kokoro-82M (Apache-2.0), on CPU.
 # usage: python gen.py <voice> [id,id,...] [--speed 0.96]
+# SCRIPTS=scripts-night.json renders the night theme's stops (they go in proof/audio/<voice>/night/)
 import sys, json, os, time
 import numpy as np, soundfile as sf
 from kokoro import KPipeline
@@ -7,7 +8,7 @@ from kokoro import KPipeline
 args = [a for a in sys.argv[1:] if not a.startswith('--')]
 speed = float(next((a.split('=')[1] for a in sys.argv if a.startswith('--speed=')), 0.96))
 voice = args[0]
-scripts = json.load(open('scripts.json'))
+scripts = json.load(open(os.environ.get('SCRIPTS', 'scripts.json')))
 ids = args[1].split(',') if len(args) > 1 else list(scripts)
 pipe = KPipeline(lang_code=voice[0], repo_id='hexgrad/Kokoro-82M')
 os.makedirs(f'out/{voice}', exist_ok=True)

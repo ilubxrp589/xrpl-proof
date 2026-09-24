@@ -19,6 +19,7 @@ const flags = [
   // this host's sandbox needs these, or Chrome hangs before opening the port
   '--no-sandbox', '--disable-dev-shm-usage', '--no-zygote', '--enable-logging=stderr', '--v=0',
   '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', `--use-angle=${process.env.SHOT_GL || 'swiftshader'}`,
+  ...(process.env.CHROME_FLAGS ? process.env.CHROME_FLAGS.split('|') : []),
 ];
 import { openSync } from 'node:fs';
 const errlog = openSync(`${out}/chrome.log`, 'w');

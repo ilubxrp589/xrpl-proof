@@ -227,7 +227,7 @@ export function xrpText(drops, sep = '\u2009') {
 
 /** A double rule round the sheet that stops short of four corner medallions,
  *  so no line runs through an ornament. */
-function frame(g, heavy, light) {
+function frame(g, heavy, light, night = false) {
   const a = 210, b = 232, gap = 58, mid = (a + b) / 2;
   const rule = (inset, lw) => {
     g.lineWidth = lw;
@@ -240,13 +240,48 @@ function frame(g, heavy, light) {
     g.stroke();
   };
   rule(a, heavy); rule(b, light);
-  for (const [cx, cy] of [[mid, mid], [W - mid, mid], [mid, H - mid], [W - mid, H - mid]]) {
+  // new moon, first quarter, full, last quarter: round the sheet as the month goes
+  const phases = [0, 0.5, 0.5, 1];
+  [[mid, mid], [W - mid, mid], [W - mid, H - mid], [mid, H - mid]].forEach(([cx, cy], k) => {
     g.lineWidth = 2.4;
     g.beginPath(); g.arc(cx, cy, 44, 0, Math.PI * 2); g.stroke();
     g.lineWidth = 1;
     g.beginPath(); g.arc(cx, cy, 38, 0, Math.PI * 2); g.stroke();
-    rosette(g, cx, cy, 20, 6, 2, 8, 16, 3, 1.1, '#fff');
+    if (night) moon(g, cx, cy, 31, k === 0 ? 0 : k === 2 ? 1 : 0.5, k === 3);
+    else rosette(g, cx, cy, 20, 6, 2, 8, 16, 3, 1.1, '#fff');
+  });
+}
+/** The moon engraved: its lit part hatched in horizontal rules, the dark part
+ *  left to the paper with a faint earthshine. lit: 0 new, 0.5 a quarter, 1 full;
+ *  waning puts the light on the left. */
+function moon(g, cx, cy, r, lit, waning) {
+  const mr = rng(Uint8Array.of(r, Math.round(lit * 10), waning ? 1 : 0));
+  g.save();
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.clip();
+  for (let y = -r + 1.2; y < r; y += 2.6) {
+    const half = Math.sqrt(r * r - y * y);
+    // the terminator: an ellipse across the disc, from the limb (new) to the far limb (full)
+    const term = half * Math.cos(lit * Math.PI);
+    let x0 = waning ? -half : -term, x1 = waning ? term : half;
+    if (lit >= 1) { x0 = -half; x1 = half; }
+    if (lit <= 0) { x0 = 0; x1 = 0; }
+    // the seas: gaps in the rules where the maria lie
+    for (let x = x0; x < x1; x += 1.5) {
+      const sea = Math.sin((cx + x) * 0.21 + mr() * 0.4) * Math.cos((cy + y) * 0.17) > 0.55 && Math.abs(x) < half * 0.8;
+      g.globalAlpha = sea ? 0.35 : 1;
+      g.fillRect(cx + x, cy + y - 0.55, 1.6, 1.1);
+    }
+    // earthshine on the dark side: a rule or two, very faint
+    if (lit < 1 && (Math.round((y + r) / 2.6) % 3 === 0)) {
+      g.globalAlpha = 0.18;
+      const d0 = waning ? term : -half, d1 = waning ? half : -term;
+      if (d1 > d0) g.fillRect(cx + d0, cy + y - 0.4, d1 - d0, 0.8);
+    }
   }
+  g.restore();
+  g.globalAlpha = 1;
+  g.lineWidth = 1.2;
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
 }
 const domainOf = v => v.domain || (v.manifest && v.manifest.domain) || short(v.master, 6, 4);
 
@@ -257,17 +292,22 @@ const domainOf = v => v.domain || (v.manifest && v.manifest.domain) || short(v.m
  *  uv     RGB fluorescent fibres (half size)
  *  water  R watermark density (quarter size)
  *  back   RGB back underprint, A back ink (packed) */
-export function buildStatic({ trustRoot, trustName, validators, quorum }) {
+export function buildStatic({ trustRoot, trustName, validators, quorum, night = false }) {
   const V = L.vignette, n = validators.length;
+  // by day two lithographic inks on white; by night light inks on the dark stock:
+  // an icy cyan fading through violet to orchid
+  const A = night ? '#6CC4E2' : TEAL, B = night ? '#8F84DC' : ROSE, MIDI = night ? '#7FA2E0' : '#708F8B';
+  const A2 = night ? '#58A9CC' : '#4F8A84';
   const fountain = ctx => {
     const f = ctx.createLinearGradient(0, 0, W, 0);
-    f.addColorStop(0, TEAL); f.addColorStop(0.5, '#708F8B'); f.addColorStop(1, ROSE);
+    f.addColorStop(0, A); f.addColorStop(0.5, MIDI); f.addColorStop(1, night ? '#C58BC0' : ROSE);
     return f;
   };
   // ── underprint
   const under = canvas(), u = under.getContext('2d');
-  u.fillStyle = '#fff'; u.fillRect(0, 0, W, H);
-  u.globalAlpha = 0.45; u.strokeStyle = fountain(u); u.lineWidth = 1.1;
+  u.fillStyle = night ? '#000' : '#fff'; u.fillRect(0, 0, W, H);
+  if (night) chart(u, V, trustRoot);
+  u.globalAlpha = night ? 0.13 : 0.45; u.strokeStyle = fountain(u); u.lineWidth = 1.1;
   for (let y = 60; y < H - 50; y += 10) {
     u.beginPath();
     for (let x = 50; x <= W - 50; x += 12) {
@@ -276,15 +316,16 @@ export function buildStatic({ trustRoot, trustName, validators, quorum }) {
     }
     u.stroke();
   }
-  u.globalAlpha = 1;
+  u.globalAlpha = night ? 0.42 : 1;                 // light ink on the dark stock carries far: printed lighter
   braid(u, 90, 90, W - 180, H - 180, 30, 46, 9, 1.35, fountain(u));
   braid(u, 138, 138, W - 276, H - 276, 13, 32, 5, 1.0, fountain(u));
+  u.globalAlpha = 1;
   // the validator rosette: 35 petals, each swung by its validator's key
   const C = L.count;
   validators.forEach((v, i) => {
     const kr = rng(hexBytes(v.master));
     const a0 = (i / n) * Math.PI * 2 - Math.PI / 2;
-    u.strokeStyle = i % 2 ? TEAL : '#4F8A84'; u.lineWidth = 1.25;
+    u.strokeStyle = i % 2 ? A : A2; u.lineWidth = 1.25;
     for (let k = 0; k < 6; k++) {
       u.beginPath();
       for (let s = 0; s <= 90; s++) {
@@ -296,17 +337,17 @@ export function buildStatic({ trustRoot, trustName, validators, quorum }) {
       u.stroke();
     }
   });
-  rosette(u, C.cx, C.cy, C.r * 0.36, 9, 4, 35, 70, 12, 1.1, ROSE);
-  rosette(u, C.cx, C.cy, C.r * 1.08, 14, 6, 35, 105, 10, 1.0, TEAL);
+  rosette(u, C.cx, C.cy, C.r * 0.36, 9, 4, 35, 70, 12, 1.1, B);
+  rosette(u, C.cx, C.cy, C.r * 1.08, 14, 6, 35, 105, 10, 1.0, A);
   // the seal's ground: fine concentric guilloché around the foil
   const S = L.seal;
-  rosette(u, S.cx, S.cy, S.r + 88, 9, 4, 35, 70, 9, 1.0, ROSE);
+  rosette(u, S.cx, S.cy, S.r + 88, 9, 4, 35, 70, 9, 1.0, B);
 
   // ── intaglio ink
   const ink = canvas(), g = ink.getContext('2d');
   g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
   g.strokeStyle = '#fff'; g.fillStyle = '#fff';
-  frame(g, 9, 2.6);
+  frame(g, 9, 2.6, night);
   // the vignette's oval frame
   g.lineWidth = 7;
   g.beginPath(); g.ellipse(V.x + V.w / 2, V.y + V.h / 2, V.w / 2 + 44, V.h / 2 + 44, 0, 0, Math.PI * 2); g.stroke();
@@ -392,8 +433,32 @@ export function buildStatic({ trustRoot, trustName, validators, quorum }) {
   wg.fillStyle = '#fff';
   wg.fillRect(L.thread.x / 4 - 1, L.frameIn / 4, L.thread.w / 4 + 2, (H - 2 * L.frameIn) / 4);
 
-  const back = buildBack({ trustRoot, trustName, validators, quorum, fountain });
+  const back = buildBack({ trustRoot, trustName, validators, quorum, fountain, night });
   return { plate, foil, uv, water, back };
+}
+
+/** The night plate's ground, as a star atlas prints it: a grid of declination
+ *  circles and hour lines round the vignette, and a dust of faint stars, placed
+ *  by the trusted key's bytes so every sheet from the same key is the same. */
+function chart(u, V, trustRoot, strength = 1) {
+  const cx = V.x + V.w / 2, cy = V.y + V.h / 2, r = rng(hexBytes(trustRoot));
+  u.save();
+  u.strokeStyle = '#6FB6D8'; u.lineWidth = 1;
+  u.globalAlpha = 0.16 * strength;
+  for (let rad = 760; rad < 2400; rad += 118) { u.beginPath(); u.arc(cx, cy, rad, 0, Math.PI * 2); u.stroke(); }
+  for (let k = 0; k < 24; k++) {
+    const a = (k / 24) * Math.PI * 2;
+    u.beginPath(); u.moveTo(cx + Math.cos(a) * 760, cy + Math.sin(a) * 760); u.lineTo(cx + Math.cos(a) * 2400, cy + Math.sin(a) * 2400); u.stroke();
+  }
+  // the dust: most of it barely there, a few brighter points
+  for (let i = 0; i < 2600; i++) {
+    const x = r() * W, y = r() * H, m = r() ** 4;
+    if (((x - cx) / (V.w / 2 + 70)) ** 2 + ((y - cy) / (V.h / 2 + 70)) ** 2 < 1) continue;   // not over the vignette
+    u.globalAlpha = (0.18 + 0.7 * m) * strength;
+    u.fillStyle = r() < 0.3 ? '#BFD7F2' : '#EAF1FA';
+    u.beginPath(); u.arc(x, y, 0.7 + 2.2 * m, 0, Math.PI * 2); u.fill();
+  }
+  u.restore();
 }
 
 /** Pack an RGB canvas and a greyscale canvas into RGBA ImageData. */
@@ -406,10 +471,11 @@ function pack(rgb, a) {
 }
 
 // ── the back: how this proof was checked ─────────────────────────────────────
-function buildBack({ trustRoot, trustName, validators, quorum, fountain }) {
+function buildBack({ trustRoot, trustName, validators, quorum, fountain, night = false }) {
   const under = canvas(), u = under.getContext('2d');
-  u.fillStyle = '#fff'; u.fillRect(0, 0, W, H);
-  u.globalAlpha = 0.38; u.strokeStyle = fountain(u); u.lineWidth = 1.1;
+  u.fillStyle = night ? '#000' : '#fff'; u.fillRect(0, 0, W, H);
+  if (night) chart(u, { x: W / 2 - 800, y: H / 2 - 600, w: 1600, h: 1200 }, trustRoot, 0.5);
+  u.globalAlpha = night ? 0.16 : 0.38; u.strokeStyle = fountain(u); u.lineWidth = 1.1;
   for (let y = 60; y < H - 50; y += 11) {
     u.beginPath();
     for (let x = 50; x <= W - 50; x += 12) {
@@ -418,12 +484,13 @@ function buildBack({ trustRoot, trustName, validators, quorum, fountain }) {
     }
     u.stroke();
   }
-  u.globalAlpha = 1;
+  u.globalAlpha = night ? 0.42 : 1;
   braid(u, 90, 90, W - 180, H - 180, 30, 46, 9, 1.35, fountain(u));
+  u.globalAlpha = 1;
   const ink = canvas(), g = ink.getContext('2d');
   g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
   g.strokeStyle = '#fff'; g.fillStyle = '#fff';
-  frame(g, 6, 1.8);
+  frame(g, 6, 1.8, night);
   text(g, 'How this proof was checked', 330, 470, 118, { weight: 700, italic: true });
   const steps = [
     ['The paper', `One key is trusted, and it is built into this page: ${trustName}, ${short(trustRoot, 12, 8)}.`],

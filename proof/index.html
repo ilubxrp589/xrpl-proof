@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <script>
-  // before the first paint: a tall screen gets the stacked layout (the renderer confirms it)
+  // before the first paint: a tall screen gets the stacked layout (the renderer confirms it),
+  // and the theme: the star atlas plate by night, ?theme=day for the cream certificate
   document.documentElement.classList.toggle('stacked', innerWidth / innerHeight < 1);
+  document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'day' ? 'day' : 'night';
 </script>
 <title>Proof</title>
 <meta name="description" content="A live certificate for the XRP Ledger. Every ledger's validator signatures, checked in your own browser against one key you choose.">
@@ -14,15 +16,29 @@
 <link rel="stylesheet" href="assets/fonts/fonts.css">
 <style>
   :root {
+    --bench-rgb: 12, 23, 18; --rag-rgb: 231, 233, 224; --shade-rgb: 5, 9, 7;
     --bench: #0c1712;       /* green leather under a lamp */
     --rag: #e7e9e0;         /* cotton rag paper */
-    --rag-dim: rgba(231, 233, 224, 0.62);
-    --rag-faint: rgba(231, 233, 224, 0.34);
+    --rag-dim: rgba(var(--rag-rgb), 0.62);
+    --rag-faint: rgba(var(--rag-rgb), 0.34);
     --teal: #5f9c95;        /* the underprint's first ink */
     --rose: #c79a95;        /* and its second */
-    --rule: rgba(231, 233, 224, 0.22);
+    --rule: rgba(var(--rag-rgb), 0.22);
     --serif: 'Bodoni Moda', 'Bodoni 72', Didot, serif;
   }
+  /* the star atlas plate: a navy room, ivory type a shade cooler, the inks of the night */
+  html[data-theme="night"] {
+    --bench-rgb: 6, 10, 21; --rag-rgb: 226, 232, 241; --shade-rgb: 2, 4, 10;
+    --bench: #060A15; --rag: #E2E8F1; --teal: #6CC4E2; --rose: #C58BC0;
+  }
+  html[data-theme="night"] #receipt {
+    --ink: #DCE4F0; --ink-soft: rgba(220, 228, 240, 0.64); --paper: #0B1328;
+    box-shadow: inset 0 0 0 1.5px rgba(220, 228, 240, 0.5), inset 0 0 0 7px var(--paper), inset 0 0 0 8px rgba(220, 228, 240, 0.22),
+                0 26px 80px rgba(0, 0, 0, 0.7);
+  }
+  html[data-theme="night"] #receipt[data-state="failed"] #rc-steps, html[data-theme="night"] #receipt[data-state="failed"] #rc-kicker { color: #FF8E7C; }
+  /* words that differ by theme: only the current one shows */
+  html[data-theme="night"] .day, html[data-theme="day"] .night { display: none; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bench); color: var(--rag); overflow: hidden; }
   body { font: 400 15px/1.5 var(--serif); font-optical-sizing: auto; -webkit-font-smoothing: antialiased; }
@@ -37,8 +53,8 @@
   #hint[hidden] { display: none; }
   /* zoomed in, the paper fills the screen: dark bands keep the controls legible */
   .scrim { position: fixed; left: 0; right: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 0.4s ease; }
-  .scrim.top { top: 0; height: 150px; background: linear-gradient(rgba(12, 23, 18, 0.9), rgba(12, 23, 18, 0.55) 55%, rgba(12, 23, 18, 0)); }
-  .scrim.bottom { bottom: 0; height: 210px; background: linear-gradient(rgba(12, 23, 18, 0), rgba(12, 23, 18, 0.6) 40%, rgba(12, 23, 18, 0.92)); }
+  .scrim.top { top: 0; height: 150px; background: linear-gradient(rgba(var(--bench-rgb), 0.9), rgba(var(--bench-rgb), 0.55) 55%, rgba(var(--bench-rgb), 0)); }
+  .scrim.bottom { bottom: 0; height: 210px; background: linear-gradient(rgba(var(--bench-rgb), 0), rgba(var(--bench-rgb), 0.6) 40%, rgba(var(--bench-rgb), 0.92)); }
   body.zoomed .scrim { opacity: 1; }
   body.zoomed header p { opacity: 0; }
   @media (prefers-reduced-motion: reduce) { .scrim, header p { transition: none; } }
@@ -94,7 +110,7 @@
 
   #legend {
     position: fixed; z-index: 3; top: 84px; right: 30px; width: min(30rem, calc(100vw - 60px));
-    background: rgba(12, 23, 18, 0.94); border: 1px solid var(--rule); padding: 22px 26px 24px;
+    background: rgba(var(--bench-rgb), 0.94); border: 1px solid var(--rule); padding: 22px 26px 24px;
     backdrop-filter: none;
   }
   #legend h2 { margin: 0 0 12px; font-size: 24px; font-style: italic; font-weight: 600; }
@@ -117,16 +133,16 @@
   #tour-dim {
     position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 0.6s ease;
     background: radial-gradient(var(--rx, 40vw) var(--ry, 40vh) at var(--cx, 50%) var(--cy, 45%),
-                rgba(5, 9, 7, 0) 58%, rgba(5, 9, 7, 0.62) 100%);
+                rgba(var(--shade-rgb), 0) 58%, rgba(var(--shade-rgb), 0.62) 100%);
   }
   #tour-dim.on { opacity: 1; }
   #tour-marks { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
   button.t-mark {
     position: absolute; left: 0; top: 0; width: 34px; height: 34px; margin: -17px 0 0 -17px; padding: 0 1px 1px 0;
     border-radius: 50%; display: grid; place-items: center; will-change: transform;
-    font: italic 600 17px/1 var(--serif); color: var(--rag); background: rgba(12, 23, 18, 0.93);
+    font: italic 600 17px/1 var(--serif); color: var(--rag); background: rgba(var(--bench-rgb), 0.93);
     /* the sheet's corner medallions: a ring, a gap, a finer ring */
-    box-shadow: 0 0 0 1px var(--rag), 0 0 0 4px rgba(12, 23, 18, 0.93), 0 0 0 5px rgba(231, 233, 224, 0.5),
+    box-shadow: 0 0 0 1px var(--rag), 0 0 0 4px rgba(var(--bench-rgb), 0.93), 0 0 0 5px rgba(var(--rag-rgb), 0.5),
                 0 6px 18px rgba(0, 0, 0, 0.45);
     opacity: 0; transition: opacity 0.35s ease, background-color 0.2s ease, color 0.2s ease; pointer-events: none;
   }
@@ -139,19 +155,19 @@
     position: fixed; z-index: 4; left: 0; right: 0; bottom: 0; color: var(--rag);
     display: grid; grid-template-columns: minmax(14rem, 20rem) minmax(0, 40rem) minmax(15rem, 1fr);
     gap: 16px 44px; align-items: start; padding: 46px 34px 26px;
-    background: linear-gradient(rgba(12, 23, 18, 0), rgba(12, 23, 18, 0.95) 36px, rgba(12, 23, 18, 0.97));
+    background: linear-gradient(rgba(var(--bench-rgb), 0), rgba(var(--bench-rgb), 0.95) 36px, rgba(var(--bench-rgb), 0.97));
   }
   #tour[hidden] { display: none; }
   /* the certificate's double rule, across the top of the band */
   #tour::before {
     content: ''; position: absolute; left: 34px; right: 34px; top: 30px; height: 3px;
-    border-top: 1.5px solid rgba(231, 233, 224, 0.3); border-bottom: 1px solid rgba(231, 233, 224, 0.13);
+    border-top: 1.5px solid rgba(var(--rag-rgb), 0.3); border-bottom: 1px solid rgba(var(--rag-rgb), 0.13);
   }
   .t-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; }
   /* the numeral is engraved, as the steps are numbered on the back of the sheet */
   .t-num {
     font: italic 700 78px/0.8 var(--serif); color: transparent; padding-right: 0.06em;
-    background: repeating-linear-gradient(rgba(231, 233, 224, 0.95) 0 1.4px, transparent 1.4px 4.2px);
+    background: repeating-linear-gradient(rgba(var(--rag-rgb), 0.95) 0 1.4px, transparent 1.4px 4.2px);
     -webkit-background-clip: text; background-clip: text; -webkit-text-stroke: 1.1px var(--rag);
   }
   #tour.intro .t-num { display: none; }
@@ -161,7 +177,7 @@
   #tour-pips button:hover { color: var(--rag); }
   #tour-pips button[aria-current="step"] { color: var(--rag); font-style: italic; }
   #tour-pips button[aria-current="step"]::after { transform: scaleX(1); height: 1.5px; }
-  #tour-body { margin: 0; font-size: 16px; line-height: 1.62; color: rgba(231, 233, 224, 0.88); max-width: 62ch; }
+  #tour-body { margin: 0; font-size: 16px; line-height: 1.62; color: rgba(var(--rag-rgb), 0.88); max-width: 62ch; }
   #tour-form { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; margin-top: 14px; max-width: 62ch; }
   #tour-form[hidden] { display: none; }
   #tour-form .field { flex: 1 1 17rem; }
@@ -221,7 +237,7 @@
   html.stacked nav.ui {
     top: auto; bottom: 0; left: 0; right: 0; max-width: none; justify-content: center; gap: 0;
     padding: 5px 6px calc(6px + env(safe-area-inset-bottom, 0px));
-    background: rgba(12, 23, 18, 0.95); border-top: 1px solid var(--rule);
+    background: rgba(var(--bench-rgb), 0.95); border-top: 1px solid var(--rule);
   }
   html.stacked nav .group { padding: 0 3px; }
   html.stacked nav button { font-size: 13px; padding: 8px 5px 9px; }
@@ -232,7 +248,7 @@
   }
   /* zoomed in, the way back sits by the title rather than growing the menu a row */
   html.stacked #fit { position: fixed; top: 14px; right: 12px; padding: 7px 12px 8px; font-size: 14px; color: var(--rag);
-                      background: rgba(12, 23, 18, 0.9); border: 1px solid var(--rule); }
+                      background: rgba(var(--bench-rgb), 0.9); border: 1px solid var(--rule); }
   html.stacked #fit::after { display: none; }
   html.stacked footer.ui {
     top: calc(var(--sheet-bottom, calc(62px + 62vw)) + 22px); bottom: calc(var(--nav-h, 90px) + 10px);
@@ -240,6 +256,9 @@
     overflow-y: auto; overscroll-behavior: contain;
   }
   html.stacked #status { font-size: 16px; max-width: none; }
+  /* the desk shows through under the words: a soft shade keeps them clear of its grain */
+  html.stacked footer.ui::before { content: ''; position: fixed; left: 0; right: 0; bottom: 0; top: calc(var(--sheet-bottom, 60vw) + 8px);
+    z-index: -1; pointer-events: none; background: linear-gradient(rgba(var(--bench-rgb), 0), rgba(var(--bench-rgb), 0.82) 48px); }
   html.stacked form#addr-form { display: grid; }
   html.stacked .trust { text-align: left; justify-self: start; }
   html.stacked .trust .k { font-size: 19px; }
@@ -248,7 +267,7 @@
   html.stacked .scrim.bottom { display: none; }
   html.stacked #legend {
     inset: 0; width: auto; padding: 22px 18px calc(30px + env(safe-area-inset-bottom, 0px));
-    overflow-y: auto; overscroll-behavior: contain; border: 0; background: rgba(12, 23, 18, 0.98);
+    overflow-y: auto; overscroll-behavior: contain; border: 0; background: rgba(var(--bench-rgb), 0.98);
   }
   html.stacked #legend dl { grid-template-columns: minmax(0, 1fr); gap: 3px; }
   html.stacked #legend dt { margin-top: 12px; }
@@ -257,7 +276,7 @@
     top: calc(var(--sheet-bottom, calc(62px + 62vw)) + 8px); bottom: 0; overflow-y: auto; overscroll-behavior: contain;
     align-content: start;
     grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 30px 16px calc(16px + env(safe-area-inset-bottom, 0px));
-    background: linear-gradient(rgba(12, 23, 18, 0), rgba(12, 23, 18, 0.96) 22px);
+    background: linear-gradient(rgba(var(--bench-rgb), 0), rgba(var(--bench-rgb), 0.96) 22px);
   }
   html.stacked #tour::before { left: 16px; right: 16px; top: 16px; }
   html.stacked .t-num { font-size: 54px; }
@@ -294,7 +313,7 @@
     #legend { top: 8px; bottom: 8px; overflow-y: auto; }
     #tour {
       left: auto; right: 0; top: 0; bottom: 0; width: min(23rem, 48vw); overflow-y: auto; align-content: start;
-      grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 16px 16px 12px; background: rgba(12, 23, 18, 0.96);
+      grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 16px 16px 12px; background: rgba(var(--bench-rgb), 0.96);
     }
     #tour::before { display: none; }
     .t-num { font-size: 42px; }
@@ -354,8 +373,8 @@
   .check button::after { transform: scaleX(1); left: 0; opacity: 0.5; }
   body.dropping::after {
     content: 'Drop a receipt to check it'; position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
-    background: rgba(12, 23, 18, 0.78); color: var(--rag); font: italic 600 30px var(--serif);
-    outline: 1.5px dashed rgba(231, 233, 224, 0.5); outline-offset: -28px; pointer-events: none;
+    background: rgba(var(--bench-rgb), 0.78); color: var(--rag); font: italic 600 30px var(--serif);
+    outline: 1.5px dashed rgba(var(--rag-rgb), 0.5); outline-offset: -28px; pointer-events: none;
   }
   html.stacked #receipt { top: auto; bottom: 0; left: 0; right: 0; transform: none; width: auto; max-height: 78vh; max-height: 78dvh;
                           padding: 22px 18px calc(18px + env(safe-area-inset-bottom, 0px)); }
@@ -402,8 +421,9 @@
   <p class="take"><button type="button" id="tour-start">Take the tour</button> Seven stops, about a minute.</p>
   <dl>
     <dt>The columns</dt><dd>One per validator on the list you trust (<span data-n>35</span> today). A column fills with ink when your browser has checked that validator’s signature on this ledger.</dd>
-    <dt>The roof</dt><dd>It goes up once <span data-q>28</span> of them have signed the same ledger. That is the quorum.</dd>
-    <dt>The dome</dt><dd>Its rays appear when the ledger’s header hashes to exactly what they signed.</dd>
+    <dt><span class="day">The roof</span><span class="night">The ring beam</span></dt><dd><span class="day">It goes up</span><span class="night">It is set under the dome</span> once <span data-q>28</span> of them have signed the same ledger. That is the quorum.</dd>
+    <dt><span class="day">The dome</span><span class="night">The star</span></dt><dd><span class="day">Its rays appear</span><span class="night">The star the telescope is trained on sends out its rays</span> when the ledger’s header hashes to exactly what they signed.</dd>
+    <dt class="night">The telescope</dt><dd class="night">Inked when an account you look up is proven against the ledger: its entry hashes, node by node, up to the state root.</dd>
     <dt>The steps</dt><dd>The validator list itself, signed by the one key you trust.</dd>
     <dt>The signatures</dt><dd>Each is drawn from the actual bytes that validator signed on this ledger.</dd>
     <dt>Backlight</dt><dd>Hold the sheet to the light: the trusted key is in the paper, as a watermark.</dd>

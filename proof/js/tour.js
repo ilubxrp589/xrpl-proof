@@ -13,6 +13,7 @@ const VOICE = 'proof.narrate';        // '0' once the visitor turns the narrator
 const WHO = 'proof.voice';            // which narrator: audio/<name>/tour-<stop>.mp3
 const VOICES = ['heart', 'fenrir'];   // Kokoro af_heart and am_fenrir: the tour's two narrators
 const GENESIS = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh';   // the first account the ledger ever had
+const NIGHT_CLIPS = ['list', 'quorum', 'ledger', 'account', 'closer'];   // stops whose words the observatory changes
 const fmt = n => Number(n).toLocaleString('en-US');
 
 // Each stop frames `rect` of the sheet and sets its number at `mark` (both in
@@ -36,7 +37,7 @@ const STEPS = [
     title: () => 'The list it signed',
     body: s => `That key signed a list of ${s.total} validators, and your browser checks that signature before ` +
       'anything else. Each validator on the list then vouches for the key it signs with today. ' +
-      'Once all of that holds, the steps of the temple are inked.',
+      `Once all of that holds, the steps of the ${s.night ? 'observatory' : 'temple'} are inked.`,
     live: s => `Checked in this browser: the list’s signature, and the keys of all ${s.total} validators.` },
   { id: 'sigs', name: 'the signatures', rect: [980, 1190, 1640, 890], mark: [2615, 1750],
     title: s => `${s.total} columns, ${s.total} validators`,
@@ -49,23 +50,24 @@ const STEPS = [
   { id: 'quorum', name: 'the quorum', rect: [290, 670, 660, 840], mark: [370, 760],
     title: s => `${s.quorum} of ${s.total} must agree`,
     body: s => `The rosette counts the signatures checked so far. Once ${s.quorum} of the ${s.total} have signed ` +
-      'the same ledger, that is a quorum: the network has accepted the ledger. The roof goes on the temple, and ' +
-      'the star on the foil seal at the right is struck.',
+      'the same ledger, that is a quorum: the network has accepted the ledger. ' +
+      (s.night ? 'The ring beam is set under the dome, and ' : 'The roof goes on the temple, and ') + 'the star on the foil seal at the right is struck.',
     live: s => (!s.seq ? ''
-      : s.quorumReached ? `Ledger ${fmt(s.seq)}: ${s.count} signed. That is a quorum, so the roof is on.`
+      : s.quorumReached ? `Ledger ${fmt(s.seq)}: ${s.count} signed. That is a quorum, so the ${s.night ? 'ring beam is set' : 'roof is on'}.`
       : `Ledger ${fmt(s.seq)}: ${s.count} signed so far, ${Math.max(0, s.quorum - s.count)} more needed.`) },
   { id: 'ledger', name: 'the ledger', rect: [1320, 630, 960, 680], mark: [1430, 830],
     title: () => 'The ledger itself',
-    body: () => 'What the validators sign is the ledger’s fingerprint, its hash. Your browser computes that hash ' +
-      'from the ledger’s header itself and compares the two. When they match, rays spread from the dome, and the ' +
+    body: s => 'What the validators sign is the ledger’s fingerprint, its hash. Your browser computes that hash ' +
+      'from the ledger’s header itself and compares the two. When they match, ' +
+      (s.night ? 'the star the telescope is trained on sends out its rays' : 'rays spread from the dome') + ', and the ' +
       'ledger’s details are printed at the bottom left: its hash, its state root, when it closed, and how much XRP exists.',
     live: s => (s.header ? `Ledger ${fmt(s.seq)}: its header hashes to ${s.header.slice(0, 10)}…, exactly what they signed.`
       : s.seq ? `Ledger ${fmt(s.seq)}: its header is checked once the quorum is in…` : '') },
   { id: 'account', name: 'an account', rect: [230, 1700, 880, 410], mark: [966, 1990], form: true,
     title: () => 'Any account, down to the drop',
-    body: () => 'Look up an address. The relay’s answer is written in pencil first. Then your browser follows ' +
+    body: s => 'Look up an address. The relay’s answer is written in pencil first. Then your browser follows ' +
       'that account’s path through the ledger’s state tree, hashing every step up to the state root, and inks the ' +
-      'balance only if it all checks out. The lantern on top of the dome lights up.',
+      `balance only if it all checks out. ${s.night ? 'The telescope is inked, trained on it.' : 'The lantern on top of the dome lights up.'}`,
     live: s => {
       const a = s.acct;
       if (!a) return 'Try the genesis account: the first account the ledger ever had.';
@@ -80,7 +82,7 @@ const STEPS = [
     } },
   { id: 'closer', name: 'looking closer', mode: 3, rect: [980, 560, 1640, 1150], mark: [2600, 1000],
     title: () => 'Look closer',
-    body: s => 'Under ultraviolet, the names of this ledger’s signers glow around the temple. ' +
+    body: s => `Under ultraviolet, the names of this ledger’s signers glow around the ${s.night ? 'observatory' : 'temple'}. ` +
       `${s.touch ? 'Pinch to zoom in anywhere (double-tap to come back)' : 'Scroll to zoom in anywhere'}, or take ` +
       'out the loupe to read the microprint in the border: it spells out the trusted key. Turn the sheet over ' +
       'for the checklist of every step, ticked for this ledger.',
@@ -195,17 +197,23 @@ export class Tour {
 
   /** Read this stop aloud, if the narrator is on. Browsers refuse sound until
    *  the visitor has clicked something: then the button offers to play it. */
+  /** A stop's clip: the night plate has its own where the words differ from the day's. */
+  clip(id) {
+    const night = this.api.state().night && NIGHT_CLIPS.includes(id);
+    return `audio/${this.who}/${night ? 'night/' : ''}tour-${id}.mp3`;
+  }
+
   speak() {
     const s = STEPS[this.i];
     if (!this.on || !this.narrate || !s) { this.voiceState(); return; }
-    const src = `audio/${this.who}/tour-${s.id}.mp3`;
+    const src = this.clip(s.id);
     if (!this.voice.src.endsWith(src)) this.voice.src = src;
     this.voice.currentTime = 0;
     this.blocked = false;
     this.api.duck(true);
     this.voice.play().catch(() => { this.blocked = true; this.api.duck(false); this.voiceState(); });
     const n = STEPS[this.i + 1];
-    if (n) this.ahead.src = `audio/${this.who}/tour-${n.id}.mp3`;
+    if (n) this.ahead.src = this.clip(n.id);
     this.voiceState();
   }
 
