@@ -798,6 +798,7 @@ function styleButtons() {
 document.querySelectorAll('[data-style]').forEach(b => b.addEventListener('click', () => {
   receiptStyle = b.dataset.style; styleButtons();
   try { localStorage.setItem('proof.receiptStyle', receiptStyle); } catch (e) { /* storage blocked */ }
+  showArt();
 }));
 styleButtons();
 const receiptWait = new Map();
@@ -854,6 +855,7 @@ async function checkFile(file) {
 
 function receiptOpen(title) {
   current = null;
+  $('#rc-art').replaceChildren();
   const r = $('#receipt');
   r.hidden = false; r.dataset.state = 'working';
   $('#rc-kicker').textContent = title;
@@ -869,7 +871,7 @@ function receiptFail(s) {
   receiptStep(s);
 }
 function receiptShow(v, bundle, kicker) {
-  current = { v, bundle };
+  current = { v, bundle, art: {} };
   const tx = v.tx, h = headline(tx), r = $('#receipt');
   r.dataset.state = 'proven';
   $('#rc-kicker').textContent = kicker;
@@ -894,16 +896,47 @@ function receiptShow(v, bundle, kicker) {
       : `From it, ${v.steps === 1 ? 'its record of earlier ledgers' : `its record of earlier ledgers and ${v.steps - 1} more headers, each the parent of the one before,`} lead to ledger ${hs(v.ledger.seq)}, and that ledger\u2019s transaction tree to the transaction.`);
   $('#rc-pdf').hidden = false;
   receiptStep('');
+  showArt();
 }
-$('#rc-close').addEventListener('click', () => { $('#receipt').hidden = true; current = null; });
+/** The receipt's picture in a look, drawn once per look and kept: what is shown is
+ *  what is downloaded. */
+function receiptArt(style) {
+  const job = current;
+  if (!job) return Promise.resolve(null);
+  if (!job.art[style]) job.art[style] = (async () => {
+    await pause(30);                                   // the panel paints first
+    if (style === 'space') await spaceFonts();
+    return style === 'space' ? drawSpaceReceipt(job.v) : drawReceipt(job.v);
+  })();
+  return job.art[style];
+}
+/** Show the receipt as it will be downloaded, in the look chosen now. */
+async function showArt() {
+  const fig = $('#rc-art'), job = current, style = receiptStyle;
+  if (!job) { fig.replaceChildren(); return; }
+  fig.dataset.busy = '';
+  if (!job.art[style]) receiptStep(style === 'space' ? 'Drawing the receipt…' : 'Engraving the receipt…');
+  const c = await receiptArt(style);
+  if (current !== job || receiptStyle !== style) return;    // closed, replaced or switched meanwhile
+  // shown from a smaller copy: letting the page scale the full sheet would shimmer on engraved lines
+  const w = Math.round(Math.min(720, (fig.clientWidth || 248) * Math.min(devicePixelRatio || 1, 3)));
+  const p = document.createElement('canvas');
+  p.width = w; p.height = Math.round(w * RH / RW);
+  const g = p.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(c, 0, 0, p.width, p.height);
+  fig.replaceChildren(p);
+  delete fig.dataset.busy;
+  receiptStep('');
+}
+$('#rc-close').addEventListener('click', () => { $('#receipt').hidden = true; current = null; $('#rc-art').replaceChildren(); });
 $('#rc-pdf').addEventListener('click', async () => {
   if (!current) return;
   const { v, bundle } = current;
   const space = receiptStyle === 'space';
-  receiptStep(space ? 'Drawing the receipt…' : 'Engraving the receipt…');
-  await pause(30);
-  if (space) await spaceFonts();
-  const c = space ? drawSpaceReceipt(v) : drawReceipt(v);
+  if (!current.art[receiptStyle]) receiptStep(space ? 'Drawing the receipt…' : 'Engraving the receipt…');
+  const c = await receiptArt(receiptStyle);
+  if (!c) return;
   const jpeg = new Uint8Array(await (await new Promise(r => c.toBlob(r, 'image/jpeg', 0.84))).arrayBuffer());
   // the engraved receipt carries its words as a footnote; the Deep Field one lays them under its picture
   const pdf = receiptPdf({ jpeg, width: RW, height: RH, title: `XRPL transaction receipt ${v.hash.slice(0, 16)}`,

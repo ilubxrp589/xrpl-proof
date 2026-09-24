@@ -336,6 +336,16 @@
                 0 26px 80px rgba(0, 0, 0, 0.55);
   }
   #receipt[hidden] { display: none; }
+  /* proven, it widens to show the receipt itself beside its words, in the look chosen */
+  #receipt[data-state="proven"] { width: min(58rem, calc(100vw - 32px)); }
+  .rc-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 30px; }
+  #receipt[data-state="proven"] .rc-body { grid-template-columns: minmax(0, 1fr) 15.5rem; }
+  .rc-side { display: none; }
+  #receipt[data-state="proven"] .rc-side { display: block; padding-top: 30px; }
+  #rc-art { position: relative; margin: 0; aspect-ratio: 1654 / 2339; background: rgba(34, 27, 48, 0.08);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px rgba(0, 0, 0, 0.35); }
+  #rc-art canvas { display: block; width: 100%; height: 100%; }
+  #rc-art[data-busy]::after { content: ''; position: absolute; inset: 0; background: var(--paper); opacity: 0.55; }
   :where(#receipt) p { margin: 0; }
   :where(#receipt) button { color: var(--ink); }
   #rc-close { position: absolute; top: 14px; right: 16px; font-size: 14px; color: var(--ink-soft); }
@@ -379,6 +389,9 @@
   html.stacked #receipt { top: auto; bottom: 0; left: 0; right: 0; transform: none; width: auto; max-height: 78vh; max-height: 78dvh;
                           padding: 22px 18px calc(18px + env(safe-area-inset-bottom, 0px)); }
   html.stacked #rc-amount { font-size: 34px; }
+  html.stacked #receipt[data-state="proven"] .rc-body { grid-template-columns: minmax(0, 1fr); }
+  html.stacked #receipt[data-state="proven"] .rc-side { padding-top: 18px; }
+  html.stacked #rc-art { width: min(100%, 15rem); margin: 0 auto; }
   @media (prefers-reduced-motion: reduce) { #receipt[data-state="working"] #rc-steps::before { animation: none; } }
 </style>
 </head>
@@ -459,18 +472,25 @@
 
 <section id="receipt" hidden role="dialog" aria-modal="false" aria-labelledby="rc-lead">
   <button type="button" id="rc-close">Close</button>
-  <p id="rc-kicker"></p>
-  <p id="rc-lead"></p>
-  <p id="rc-amount"></p>
-  <p id="rc-issuer"></p>
-  <p id="rc-parties"></p>
-  <p id="rc-outcome"></p>
-  <dl id="rc-rows"></dl>
-  <p id="rc-proof"></p>
-  <p class="rc-style" id="rc-style" role="group" aria-label="The receipt's look"><span>Look</span>
-    <button type="button" data-style="engraved" aria-pressed="true">Engraved</button>
-    <button type="button" data-style="space" aria-pressed="false">Deep field</button></p>
-  <button type="button" id="rc-pdf" hidden>Download the receipt (PDF)</button>
+  <div class="rc-body">
+    <div class="rc-text">
+      <p id="rc-kicker"></p>
+      <p id="rc-lead"></p>
+      <p id="rc-amount"></p>
+      <p id="rc-issuer"></p>
+      <p id="rc-parties"></p>
+      <p id="rc-outcome"></p>
+      <dl id="rc-rows"></dl>
+      <p id="rc-proof"></p>
+    </div>
+    <div class="rc-side">
+      <figure id="rc-art" role="img" aria-label="The receipt, as it will be downloaded"></figure>
+      <p class="rc-style" id="rc-style" role="group" aria-label="The receipt's look"><span>Look</span>
+        <button type="button" data-style="engraved" aria-pressed="true">Engraved</button>
+        <button type="button" data-style="space" aria-pressed="false">Deep field</button></p>
+      <button type="button" id="rc-pdf" hidden>Download the receipt (PDF)</button>
+    </div>
+  </div>
   <p id="rc-steps" aria-live="polite"></p>
 </section>
 
