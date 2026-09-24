@@ -383,6 +383,11 @@ void main(){
   vec3 Nb = normalize(N - (T * (hX - ink) - B * (hY - ink)) * 0.9 * bump
                         + (vec3(noise(uv * 2600.0), noise(uv * 2600.0 + 7.0), 0.0) - 0.5) * 0.04);
 
+  // the count prints on a clean ground: the guilloché is knocked out in a narrow margin
+  // round its figures, as a security printer leaves it, so the number sits on top
+  float knock = back ? 0.0 : smoothstep(0.04, 0.3, textureLod(uDyn, uv, 3.6).b);
+  col = mix(col, paper, knock * 0.92);
+
   // the serial, the optically variable count, the intaglio, pencil
   float cosv = clamp(dot(Nb, V), 0.0, 1.0);
   float pencil = duv.g;
