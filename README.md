@@ -70,6 +70,6 @@ In `proof/test/`, `live.mjs` and `balance.mjs` check the verifier against mainne
 
 ## License
 
-MIT, copyright James Turner. If you use this code, keep its copyright notice, which credits James Turner and links back to this repository: https://github.com/ilubxrp589/xrpl-proof.
+MIT, with an attribution requirement: if you use, copy or modify this code, credit James Turner with a link to https://github.com/ilubxrp589/xrpl-proof. See [LICENSE](LICENSE). The third-party parts listed above keep their own licences.
 
 The certificate is proof of ledger state only: not currency, and of no monetary value.
